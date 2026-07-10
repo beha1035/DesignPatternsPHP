@@ -28,6 +28,32 @@ L'agent :
 Un brief prêt à l'emploi pour ce voyage se trouve dans
 [`briefs/la-cigale-tabarka.md`](briefs/la-cigale-tabarka.md).
 
+### Valider un prix (session réelle) — `validate-rate`
+
+Pour transformer une **estimation** en **prix vérifié**, l'agent dispose d'un
+outil de validation qui pilote un vrai navigateur (Playwright + Chromium) sur des
+deep links préremplis :
+
+```bash
+node .claude/agents/tools/validate-rate.mjs \
+  --checkin 2026-07-15 --checkout 2026-07-17 \
+  --adults 2 --children 10 --currency EUR
+```
+
+- Sortie **JSON** par canal : `verified` / `blocked` / `no_price` / `error`,
+  prix lus, et screenshot dans `reports/`.
+- N'invente jamais de prix : un blocage ou une étape interactive est reporté tel
+  quel.
+- **Prérequis réseau** : le domaine doit être joignable. Dans une session web à
+  politique d'egress fermée, les sites de voyage renvoient **403 au CONNECT** →
+  la validation live échoue ; on retombe alors sur les **liens préremplis** que
+  l'utilisateur ouvre lui-même. À exécuter idéalement en local ou dans un
+  environnement à réseau ouvert, ou à remplacer par une **API hôtel** (Amadeus,
+  RateHawk, Hotelbeds…) pour une fiabilité maximale.
+
+Fichiers : `tools/validate-rate.mjs` (pilote) et `tools/deep-links.mjs`
+(constructeurs d'URL préremplies).
+
 ### Points d'attention (marché tunisien)
 
 - **Enfants 2 ans et + facturés comme adultes** à La Cigale — l'âge de l'enfant
