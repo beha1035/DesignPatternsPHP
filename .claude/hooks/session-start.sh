@@ -14,37 +14,39 @@ if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
     if [ -f /root/.ccr/ca-bundle.crt ]; then
       echo 'export NODE_EXTRA_CA_CERTS=/root/.ccr/ca-bundle.crt'
     fi
-    # 2. Surface Amadeus credentials (set as environment secrets) to the tools.
+    # 2. Surface the price-API key(s) (set as environment secrets) to the tools.
+    #    SerpApi/Google Hotels is the preferred path (Amadeus SS closes 2026-07-17).
+    [ -n "${SERPAPI_KEY:-}" ] && echo "export SERPAPI_KEY=${SERPAPI_KEY}"
     if [ -n "${AMADEUS_CLIENT_ID:-}" ] && [ -n "${AMADEUS_CLIENT_SECRET:-}" ]; then
-      echo "export AMADEUS_CLIENT_ID=${AMADEUS_CLIENT_ID}"
+      echo "export AMADEUS_CLIENT_ID=${AMADEUS_CLIENT_ID}"       # Enterprise only
       echo "export AMADEUS_CLIENT_SECRET=${AMADEUS_CLIENT_SECRET}"
     fi
   } >> "$CLAUDE_ENV_FILE"
 fi
 
 # --- 3. Report readiness (non-fatal) ----------------------------------------
-if [ -n "${AMADEUS_CLIENT_ID:-}" ] && [ -n "${AMADEUS_CLIENT_SECRET:-}" ]; then
-  log "Amadeus credentials detected — verified-price validation enabled."
+if [ -n "${SERPAPI_KEY:-}" ]; then
+  log "SERPAPI_KEY detected — verified-price validation via Google Hotels enabled."
 else
-  log "No AMADEUS_CLIENT_ID/SECRET set. Add them as environment secrets to enable"
-  log "verified prices (free app at https://developers.amadeus.com). Falling back"
-  log "to browser deep-link validation + web-search estimates."
+  log "No SERPAPI_KEY set. Add it as an environment secret to enable verified"
+  log "prices (key at https://serpapi.com). Falling back to browser deep-link"
+  log "validation (validate-rate) + web-search estimates."
 fi
 
-# --- 4. Network preflight to the Amadeus host (informative only) ------------
+# --- 4. Network preflight to the price-API host (informative only) ----------
 if command -v curl >/dev/null 2>&1; then
   cacert=""
   [ -f /root/.ccr/ca-bundle.crt ] && cacert="--cacert /root/.ccr/ca-bundle.crt"
   # Relies on HTTPS_PROXY from the environment (as configured for this session).
   code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 $cacert \
-    https://test.api.amadeus.com/v1/security/oauth2/token 2>/dev/null)
+    "https://serpapi.com/search.json?engine=google_hotels" 2>/dev/null)
   code=${code:-000}
   case "$code" in
-    000) log "Preflight: Amadeus host unreachable (network/egress). Run locally with"
-         log "           your key, or allowlist test.api.amadeus.com in egress." ;;
-    403|407) log "Preflight: egress policy blocks test.api.amadeus.com (HTTP $code)."
-             log "           Allowlist the host in this environment or run locally." ;;
-    *)   log "Preflight: Amadeus host reachable (HTTP $code)." ;;
+    000) log "Preflight: serpapi.com unreachable (network/egress). Allowlist"
+         log "           serpapi.com in this environment, or run tools locally." ;;
+    403|407) log "Preflight: egress policy blocks serpapi.com (HTTP $code)."
+             log "           Allowlist serpapi.com in this environment or run locally." ;;
+    *)   log "Preflight: serpapi.com reachable (HTTP $code)." ;;
   esac
 fi
 

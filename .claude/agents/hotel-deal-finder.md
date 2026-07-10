@@ -107,31 +107,32 @@ node .claude/agents/tools/validate-rate.mjs \
   pour les domaines de voyage → l'outil ne pourra pas valider ; garde alors les
   liens préremplis pour une validation manuelle par l'utilisateur.
 
-### Outil `amadeus-rate` (API hôtel officielle — voie prioritaire)
+### Outil `google-hotels-rate` (API prix — voie prioritaire)
 
-Script dans `tools/amadeus-rate.mjs`. Interroge l'**API Amadeus Self-Service
-Hotel Search** : données structurées, taxes détaillées, **pas de 403 anti-bot**.
-C'est la voie de validation à privilégier ; `validate-rate` reste le filet pour
-les canaux sans API (sites tunisiens).
+Script dans `tools/google-hotels-rate.mjs`. Interroge **SerpApi / Google Hotels**
+qui agrège les tarifs OTA + direct pour des dates + occupants exacts, **sans 403
+anti-bot**. C'est la voie de validation à privilégier ; `validate-rate` reste le
+filet pour les canaux sans couverture.
 
 ```bash
-export AMADEUS_CLIENT_ID=xxx AMADEUS_CLIENT_SECRET=xxx   # app gratuite sur developers.amadeus.com
-node .claude/agents/tools/amadeus-rate.mjs \
+export SERPAPI_KEY=xxx   # clé self-service sur serpapi.com (essai gratuit puis payant)
+node .claude/agents/tools/google-hotels-rate.mjs \
   --checkin 2026-07-15 --checkout 2026-07-17 \
-  --adults 2 --children 10 --currency EUR --city TBJ
-# --prod pour l'inventaire production ; --hotel-ids XXXX pour cibler l'hôtel
+  --adults 2 --children 10 --currency EUR --query "La Cigale Tabarka" --gl tn --hl fr
+# --property-token TOKEN pour cibler l'hôtel exact
 ```
 
-- Résout l'hôtel via la ville (IATA `TBJ` = aéroport de Tabarka), récupère les
-  offres datées, et renvoie des offres `status: "verified"`, `confidence: 0.95`,
-  au **schéma normalisé** de l'agent.
-- Enfant 2+ replié dans le compte adultes (la v3 tarife sur `adults`).
-- **Prérequis** : identifiants Amadeus + hôte joignable. En session à egress
-  fermée, `test.api.amadeus.com` renvoie `403 Host not in allowlist` → l'ajouter
-  à l'allowlist réseau de l'environnement, ou exécuter en local.
+- Cherche l'hôtel, récupère les prix datés par source, et renvoie des offres
+  `status: "verified"`, `confidence: 0.9`, au **schéma normalisé** de l'agent.
+- Passe l'occupation réelle (2 adultes + enfant 10 ans) ; le régime (`board`) est
+  rarement exposé par Google Hotels → marqué `unknown`, à confirmer.
+- **Prérequis** : `SERPAPI_KEY` + hôte joignable. En session à egress fermée,
+  `serpapi.com` est bloqué → l'ajouter à l'allowlist réseau, ou exécuter en local.
 
-Autres API équivalentes selon la couverture : RateHawk/ETG, Hotelbeds/TravelGate,
-Booking Demand API, Expedia Rapid.
+**Déprécié — `amadeus-rate.mjs`** : le portail **Amadeus Self-Service ferme le
+2026-07-17**. Le script est conservé uniquement pour un accès **Amadeus
+Enterprise** (`--prod` + identifiants entreprise). Autres API équivalentes selon
+la couverture : Makcorps, RateHawk/ETG, Hotelbeds/TravelGate.
 
 ## Règles métier à ne jamais oublier
 

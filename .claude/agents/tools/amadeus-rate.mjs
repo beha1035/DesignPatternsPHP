@@ -1,8 +1,13 @@
 #!/usr/bin/env node
-// amadeus-rate — verified hotel prices via the Amadeus Self-Service Hotel Search
-// API. This is the *preferred* validation path: structured data, taxes broken
-// out, no anti-bot 403. Use it instead of scraping wherever the hotel is in
-// Amadeus's inventory; fall back to validate-rate.mjs for channels without an API.
+// amadeus-rate — DEPRECATED. The Amadeus for Developers Self-Service portal is
+// decommissioned on 2026-07-17; new self-service keys are no longer viable.
+// Prefer google-hotels-rate.mjs (SerpApi/Google Hotels) as the validation path.
+// This script is kept for anyone with Amadeus *Enterprise* access (run --prod
+// with enterprise credentials against api.amadeus.com).
+//
+// amadeus-rate — verified hotel prices via the Amadeus Hotel Search API:
+// structured data, taxes broken out, no anti-bot 403. Falls back to
+// validate-rate.mjs for channels without an API.
 //
 // Setup (one-time, free): create an app at https://developers.amadeus.com,
 // then export credentials:
@@ -142,6 +147,10 @@ function normalize(rawList, q) {
 // --- main -------------------------------------------------------------------
 (async () => {
   const args = parseArgs(process.argv);
+  console.error(
+    "[amadeus-rate] DEPRECATED: Amadeus Self-Service closes 2026-07-17. " +
+    "Use google-hotels-rate.mjs unless you have Amadeus Enterprise access."
+  );
   const query = {
     hotel: "La Cigale Tabarka",
     checkin: args.checkin, checkout: args.checkout,

@@ -54,27 +54,29 @@ node .claude/agents/tools/validate-rate.mjs \
 Fichiers : `tools/validate-rate.mjs` (pilote) et `tools/deep-links.mjs`
 (constructeurs d'URL préremplies).
 
-### Prix vérifiés via API officielle — `amadeus-rate` (recommandé)
+### Prix vérifiés via API — `google-hotels-rate` (recommandé)
 
-Voie la plus fiable : l'**API Amadeus Self-Service** (données structurées, taxes
-incluses, pas de blocage anti-bot). Clé gratuite sur developers.amadeus.com.
+Voie la plus fiable et pérenne : **SerpApi / Google Hotels** (prix datés agrégés
+OTA + direct, pas de blocage anti-bot). Clé self-service sur serpapi.com (essai
+gratuit puis payant).
 
 ```bash
-export AMADEUS_CLIENT_ID=xxx AMADEUS_CLIENT_SECRET=xxx
-node .claude/agents/tools/amadeus-rate.mjs \
+export SERPAPI_KEY=xxx
+node .claude/agents/tools/google-hotels-rate.mjs \
   --checkin 2026-07-15 --checkout 2026-07-17 \
-  --adults 2 --children 10 --currency EUR --city TBJ   # --prod, --hotel-ids XXXX
+  --adults 2 --children 10 --currency EUR --query "La Cigale Tabarka" --gl tn --hl fr
 ```
 
-- Sortie JSON au schéma normalisé, offres `verified` (confidence 0.95), triées
-  par prix.
-- Gère proprement l'absence d'identifiants et les blocages réseau (jamais de prix
-  inventé).
-- **Egress** : en session web fermée, `test.api.amadeus.com` renvoie
-  `403 Host not in allowlist` → autoriser l'hôte dans la network policy de
-  l'environnement, ou exécuter en local avec ta clé.
+- Sortie JSON au schéma normalisé, offres `verified` (confidence 0.9), triées par
+  prix, une ligne par source (OTA/direct).
+- Gère proprement l'absence de clé et les blocages réseau (jamais de prix inventé).
+- **Egress** : en session web fermée, `serpapi.com` est bloqué → l'autoriser dans
+  la network policy de l'environnement, ou exécuter en local avec ta clé.
 
-Fichier : `tools/amadeus-rate.mjs`.
+Fichier : `tools/google-hotels-rate.mjs`.
+
+> **Déprécié** : `tools/amadeus-rate.mjs` — le portail Amadeus Self-Service ferme
+> le **2026-07-17**. Conservé uniquement pour un accès Amadeus **Enterprise**.
 
 ### Points d'attention (marché tunisien)
 
