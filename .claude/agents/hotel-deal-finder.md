@@ -107,10 +107,31 @@ node .claude/agents/tools/validate-rate.mjs \
   pour les domaines de voyage → l'outil ne pourra pas valider ; garde alors les
   liens préremplis pour une validation manuelle par l'utilisateur.
 
-**Voie encore plus fiable (recommandée à terme) :** brancher une **API hôtel
-officielle** (Amadeus self-service, RateHawk/ETG, Hotelbeds, Booking Demand API,
-Expedia Rapid) plutôt que le scraping — données structurées, taxes incluses, pas
-de 403. `validate-rate` reste le filet pour les canaux sans API (sites tunisiens).
+### Outil `amadeus-rate` (API hôtel officielle — voie prioritaire)
+
+Script dans `tools/amadeus-rate.mjs`. Interroge l'**API Amadeus Self-Service
+Hotel Search** : données structurées, taxes détaillées, **pas de 403 anti-bot**.
+C'est la voie de validation à privilégier ; `validate-rate` reste le filet pour
+les canaux sans API (sites tunisiens).
+
+```bash
+export AMADEUS_CLIENT_ID=xxx AMADEUS_CLIENT_SECRET=xxx   # app gratuite sur developers.amadeus.com
+node .claude/agents/tools/amadeus-rate.mjs \
+  --checkin 2026-07-15 --checkout 2026-07-17 \
+  --adults 2 --children 10 --currency EUR --city TBJ
+# --prod pour l'inventaire production ; --hotel-ids XXXX pour cibler l'hôtel
+```
+
+- Résout l'hôtel via la ville (IATA `TBJ` = aéroport de Tabarka), récupère les
+  offres datées, et renvoie des offres `status: "verified"`, `confidence: 0.95`,
+  au **schéma normalisé** de l'agent.
+- Enfant 2+ replié dans le compte adultes (la v3 tarife sur `adults`).
+- **Prérequis** : identifiants Amadeus + hôte joignable. En session à egress
+  fermée, `test.api.amadeus.com` renvoie `403 Host not in allowlist` → l'ajouter
+  à l'allowlist réseau de l'environnement, ou exécuter en local.
+
+Autres API équivalentes selon la couverture : RateHawk/ETG, Hotelbeds/TravelGate,
+Booking Demand API, Expedia Rapid.
 
 ## Règles métier à ne jamais oublier
 

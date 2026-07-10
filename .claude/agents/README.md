@@ -54,6 +54,28 @@ node .claude/agents/tools/validate-rate.mjs \
 Fichiers : `tools/validate-rate.mjs` (pilote) et `tools/deep-links.mjs`
 (constructeurs d'URL préremplies).
 
+### Prix vérifiés via API officielle — `amadeus-rate` (recommandé)
+
+Voie la plus fiable : l'**API Amadeus Self-Service** (données structurées, taxes
+incluses, pas de blocage anti-bot). Clé gratuite sur developers.amadeus.com.
+
+```bash
+export AMADEUS_CLIENT_ID=xxx AMADEUS_CLIENT_SECRET=xxx
+node .claude/agents/tools/amadeus-rate.mjs \
+  --checkin 2026-07-15 --checkout 2026-07-17 \
+  --adults 2 --children 10 --currency EUR --city TBJ   # --prod, --hotel-ids XXXX
+```
+
+- Sortie JSON au schéma normalisé, offres `verified` (confidence 0.95), triées
+  par prix.
+- Gère proprement l'absence d'identifiants et les blocages réseau (jamais de prix
+  inventé).
+- **Egress** : en session web fermée, `test.api.amadeus.com` renvoie
+  `403 Host not in allowlist` → autoriser l'hôte dans la network policy de
+  l'environnement, ou exécuter en local avec ta clé.
+
+Fichier : `tools/amadeus-rate.mjs`.
+
 ### Points d'attention (marché tunisien)
 
 - **Enfants 2 ans et + facturés comme adultes** à La Cigale — l'âge de l'enfant
