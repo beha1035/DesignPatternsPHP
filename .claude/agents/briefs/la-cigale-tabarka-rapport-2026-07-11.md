@@ -62,9 +62,37 @@ Captures de validation du créneau 14→16/07 versionnées dans
 `.claude/agents/reports/` (Booking, h-rez, Tunisie Booking, Trip.com). Captures de
 balayage des autres créneaux conservées dans le scratchpad de session.
 
+## Vérification promos / OTA étrangères (2e balayage)
+
+Question posée : peut-on descendre sous 796 € via des sites étrangers ou en cumulant
+des promos ? **Verdict : non, aucun prix vérifié inférieur à 796 € à config comparable.**
+
+Canaux supplémentaires testés en session live : **Expedia** (HTTP 429 anti-bot),
+**Hotels.com** (widget prix bloqué en chargement), **Agoda** (params URL ignorés par le
+SPA, calendrier non pilotable), **Traveltodo** / **Libertavoyages** (deep-link daté non
+supporté), **Destinia** (404).
+
+Découverte majeure : **14→16/07 est le seul créneau de la fenêtre avec une chambre unique
+pour 3 personnes.** Ailleurs : 15→17 force 2 chambres (~1 026 €, non comparable) ;
+16→18, 17→19, 18→20, 19→21 sont **complets** pour cet hôtel.
+
+Promos repérées mais **non chiffrables** (verrouillées derrière un compte connecté — aucun
+montant inventé) :
+- **Booking Genius** : « connectez-vous pour voir votre réduction » → ‑10/15 % possible,
+  invisible sans login. **Seule vraie piste pour passer sous 796 €** (≈ 717 € si ‑10 %).
+- **Hotels.com Member Prices / One Key** : idem, gated.
+- **Coupons Trip.com / Agoda** : non testables (moteur bascule sur 2 chambres pour 3 pers).
+- **Cashback** : hors portée d'un scraping ; cumulable côté utilisateur.
+
+Action côté utilisateur : réserver **connecté sur Booking.com** pour capter un éventuel
+tarif Genius, sinon **TunisieBooking à 796 €** reste la meilleure offre publique vérifiée.
+
 ## Sources
 
 - <https://tn.tunisiebooking.com/detail_hotel_354/>
 - <https://www.booking.com/hotel/tn/tabarka-beach.html>
 - <https://fr.trip.com/hotels/tabarka-hotel-detail-10717795/la-cigale-tabarka/>
+- <https://www.expedia.com/Tabarka-Hotels-La-Cigale-Tabarka-Hotel-Thalasso-Spa-Golf.h9209677.Hotel-Information>
+- <https://www.hotels.com/ho481157/la-cigale-tabarka-hotel-thalasso-spa-golf-tabarka-tunisia/>
+- <https://www.agoda.com/fr-fr/la-cigale-tabarka/hotel/tabarka-tn.html>
 - <https://www.lacigaletabarka.com/>
