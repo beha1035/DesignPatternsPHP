@@ -60,6 +60,31 @@ recoupe les prix :
 Utilise `WebSearch` pour localiser les pages et les tarifs indicatifs, puis
 `WebFetch` pour lire une fiche précise.
 
+### Cascade de tarification (ordre à respecter — navigateur en DERNIER)
+
+Le navigateur est lent et fragile : ne l'allume qu'en dernier recours. Suis cet
+ordre du moins cher/plus rapide au plus coûteux. Point d'entrée unique :
+**`tools/find-best-rate.mjs`** (orchestrateur), qui balaye tous les créneaux
+d'une fenêtre flexible en parallèle, normalise en EUR, classe, et **court-circuite
+dès que deux canaux indépendants concordent** (±3 %).
+
+| Tier | Outil | Vitesse | Quand |
+|---|---|---|---|
+| **0 — APIs structurées** | `google-hotels-rate.mjs` (+ `apify-hotel-rates.mjs` si `APIFY_TOKEN`) | ~1–3 s | Toujours en premier |
+| **1 — HTTP sans navigateur** | `tunisiebooking-rate.mjs` (rejeu d'endpoint, en-têtes réalistes) | ~2 s | Canaux « faux 403 » (TunisieBooking prouvé) |
+| **2 — Débloqueur managé** | `brightdata-unlock.mjs` (Web Unlocker, si `BRIGHTDATA_API_KEY`) | ~3–8 s | Uniquement pour combler un trou / corroborer |
+| **3 — Navigateur maison** | `validate-rate.mjs` (Playwright) | ~30–60 s | Ultime recours hors-ligne |
+
+```bash
+node .claude/agents/tools/find-best-rate.mjs \
+  --hotel la-cigale-tabarka --window 2026-07-14..2026-07-20 --nights 2 \
+  --adults 2 --children 10 --eur-rate 3.37
+```
+
+L'orchestrateur signale dans `escalation` le tier exact à lancer si le meilleur
+prix reste mono-source ou introuvable. Les IDs d'hôtel par canal sont mis en
+cache dans `tools/cache/hotel-ids.json` (les runs suivants sautent la découverte).
+
 ### Deux étages : découverte puis validation
 
 Sépare toujours **découverte** (trouver des offres candidates via `WebSearch`) et
@@ -128,6 +153,42 @@ node .claude/agents/tools/google-hotels-rate.mjs \
   rarement exposé par Google Hotels → marqué `unknown`, à confirmer.
 - **Prérequis** : `SERPAPI_KEY` + hôte joignable. En session à egress fermée,
   `serpapi.com` est bloqué → l'ajouter à l'allowlist réseau, ou exécuter en local.
+
+### Outil `tunisiebooking-rate` (Tier 1 — prix vérifié SANS navigateur)
+
+Script dans `tools/tunisiebooking-rate.mjs`. TunisieBooking porte souvent le
+tarif le moins cher pour la Tunisie mais est **invisible sur Google Hotels**. Son
+« 403 anti-bot » n'en est pas un : avec de vrais en-têtes, son propre endpoint de
+prix répond en ~2 s et **embarque le total de chaque chambre dans des champs
+cachés**. L'outil rejoue cet appel — pas de Chromium.
+
+```bash
+node .claude/agents/tools/tunisiebooking-rate.mjs \
+  --checkin 2026-07-14 --checkout 2026-07-16 --adults 2 --children 10 \
+  --hotel-id 354 --ville Tabarka
+```
+
+- Renvoie des offres `verified` (`confidence 0.9`) au schéma de l'agent, TND, avec
+  les **2 % de frais de dossier** inclus dans `total` (et `baseBeforeFee`).
+- `--hotel-id` = l'`id_hotel_xml` TunisieBooking (La Cigale = `354`, en cache).
+- Honnête : `no_price` si l'hôtel est indisponible ces dates, `blocked` si l'hôte
+  est filtré par l'egress.
+
+### Outil `apify-hotel-rates` (Tier 0 breadth — multi-OTA, clé requise)
+
+Script dans `tools/apify-hotel-rates.mjs`. Un appel à un actor Apify qui compare
+de nombreuses OTA côté serveur (Apify pilote le navigateur + proxies à notre
+place). Complète Google Hotels sur l'inventaire régional. **Key-gated** :
+`APIFY_TOKEN` (+ `APIFY_HOTEL_ACTOR`) ; sans clé, échoue proprement pour que
+l'orchestrateur reste sur les tiers gratuits.
+
+### Outil `brightdata-unlock` (Tier 2 — débloqueur managé, clé requise)
+
+Script dans `tools/brightdata-unlock.mjs`. Web Unlocker de Bright Data (proxy +
+CAPTCHA + rendu JS, ~98 % succès) qui **remplace le navigateur maison** pour les
+sites récalcitrants (Agoda, Hotels.com, Expedia 429). **Key-gated** :
+`BRIGHTDATA_API_KEY` (+ `BRIGHTDATA_ZONE`, 5 000 req/mois gratuites). Sans clé,
+l'orchestrateur retombe sur `validate-rate.mjs`.
 
 **Déprécié — `amadeus-rate.mjs`** : le portail **Amadeus Self-Service ferme le
 2026-07-17**. Le script est conservé uniquement pour un accès **Amadeus

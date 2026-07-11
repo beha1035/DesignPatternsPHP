@@ -28,6 +28,28 @@ L'agent :
 Un brief prêt à l'emploi pour ce voyage se trouve dans
 [`briefs/la-cigale-tabarka.md`](briefs/la-cigale-tabarka.md).
 
+### Cascade de tarification — `find-best-rate` (point d'entrée)
+
+L'agent cherche le meilleur prix **du plus rapide au plus coûteux, navigateur en
+dernier**. L'orchestrateur `tools/find-best-rate.mjs` balaye toute une fenêtre de
+dates en parallèle et **s'arrête dès que deux canaux concordent** :
+
+```bash
+node .claude/agents/tools/find-best-rate.mjs \
+  --hotel la-cigale-tabarka --window 2026-07-14..2026-07-20 --nights 2 \
+  --adults 2 --children 10
+```
+
+| Tier | Outil | Clé ? | Rôle |
+|---|---|---|---|
+| 0 | `google-hotels-rate.mjs`, `apify-hotel-rates.mjs` | SerpApi / Apify | APIs structurées |
+| 1 | `tunisiebooking-rate.mjs` | — (gratuit) | HTTP sans navigateur (prouvé ~2 s) |
+| 2 | `brightdata-unlock.mjs` | Bright Data | Débloqueur managé pour combler un trou |
+| 3 | `validate-rate.mjs` | — | Navigateur maison, ultime recours |
+
+Balayage complet des 5 créneaux 14–20/07 : **~9 s** (contre ~30–50 min tout
+navigateur). Les IDs par canal sont mis en cache dans `tools/cache/hotel-ids.json`.
+
 ### Valider un prix (session réelle) — `validate-rate`
 
 Pour transformer une **estimation** en **prix vérifié**, l'agent dispose d'un

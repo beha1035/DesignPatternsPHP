@@ -1,0 +1,13 @@
+{
+  "_comment": "Discovery cache: per-hotel channel identifiers so repeat runs skip the search step (Tier: cache). Keyed by a stable slug.",
+  "la-cigale-tabarka": {
+    "displayName": "La Cigale Tabarka Hôtel Thalasso, Spa & Golf",
+    "city": "Tabarka",
+    "country": "TN",
+    "tunisiebooking": { "hotelId": "354", "ville": "Tabarka" },
+    "googleHotels": { "query": "La Cigale Tabarka Thalasso" },
+    "booking": { "slug": "tn/tabarka-beach" },
+    "trip": { "id": "10717795" },
+    "childPolicy": "child aged 2+ billed as an adult (verified on TunisieBooking + Booking.com)"
+  }
+}

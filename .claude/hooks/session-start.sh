@@ -21,6 +21,11 @@ if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
       echo "export AMADEUS_CLIENT_ID=${AMADEUS_CLIENT_ID}"       # Enterprise only
       echo "export AMADEUS_CLIENT_SECRET=${AMADEUS_CLIENT_SECRET}"
     fi
+    # Optional cascade keys (key-gated tiers self-skip when unset).
+    [ -n "${APIFY_TOKEN:-}" ] && echo "export APIFY_TOKEN=${APIFY_TOKEN}"                     # Tier 0 breadth
+    [ -n "${APIFY_HOTEL_ACTOR:-}" ] && echo "export APIFY_HOTEL_ACTOR=${APIFY_HOTEL_ACTOR}"
+    [ -n "${BRIGHTDATA_API_KEY:-}" ] && echo "export BRIGHTDATA_API_KEY=${BRIGHTDATA_API_KEY}" # Tier 2 unblocker
+    [ -n "${BRIGHTDATA_ZONE:-}" ] && echo "export BRIGHTDATA_ZONE=${BRIGHTDATA_ZONE}"
   } >> "$CLAUDE_ENV_FILE"
 fi
 
@@ -29,9 +34,11 @@ if [ -n "${SERPAPI_KEY:-}" ]; then
   log "SERPAPI_KEY detected — verified-price validation via Google Hotels enabled."
 else
   log "No SERPAPI_KEY set. Add it as an environment secret to enable verified"
-  log "prices (key at https://serpapi.com). Falling back to browser deep-link"
-  log "validation (validate-rate) + web-search estimates."
+  log "prices (key at https://serpapi.com). The free browserless Tier 1"
+  log "(tunisiebooking-rate) + web-search estimates still work without it."
 fi
+[ -n "${APIFY_TOKEN:-}" ] && log "APIFY_TOKEN detected — Tier 0 multi-OTA breadth enabled."
+[ -n "${BRIGHTDATA_API_KEY:-}" ] && log "BRIGHTDATA_API_KEY detected — Tier 2 managed unblocker enabled (browser demoted to last resort)."
 
 # --- 4. Network preflight to the price-API host (informative only) ----------
 if command -v curl >/dev/null 2>&1; then
