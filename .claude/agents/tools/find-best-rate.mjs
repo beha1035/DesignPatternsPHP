@@ -25,6 +25,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { getRate } from "./lib/fx.mjs";
 import { planForCountry } from "./lib/country-router.mjs";
+import { resolveCity } from "./lib/geo.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const AGREE_TOLERANCE = 0.03; // 3% -> two channels "agree" on the leader.
@@ -115,9 +116,20 @@ const toEUR = (o, rate) => {
   }
   const ids = cache[a.hotel] || {};
 
+  // Detect the country from the request: explicit --country wins, else the cached
+  // country, else geo-resolve it from the city (--city or the cached city). This
+  // is what makes channel selection automatic "en fonction de la demande".
+  let country = a.country || ids.country || null;
+  let geo = null;
+  const cityQ = a.city || ids.city || null;
+  if (!country && cityQ) {
+    geo = await resolveCity(cityQ, { countryHint: a.country || null });
+    if (geo?.country) country = geo.country;
+  }
+
   // Country-aware channel plan (cited config): which channels to prioritise for
-  // this hotel's country, split into what we can price now vs. what to check.
-  const plan = await planForCountry(a.country || ids.country || null);
+  // this country, split into what we can price now vs. what to check.
+  const plan = await planForCountry(country);
   const tb = ids.tunisiebooking || {};
   const gh = ids.googleHotels || {};
 
@@ -233,10 +245,15 @@ const toEUR = (o, rate) => {
     },
     generatedAt: new Date().toISOString(),
     fx: { pair: "EUR/TND", rate, stale: fx.stale, source: fx.source },
+    geo: geo && { detectedCity: geo.city, country: geo.country, countryName: geo.countryName, source: geo.source },
     channelPlan: {
       country: plan.country, region: plan.region, matched: plan.matched,
+      countrySource: a.country ? "explicit" : ids.country ? "cache" : geo ? "geo-detected" : "default",
       pricedNow: plan.actionable.map((c) => c.channel),
       alsoCheck: plan.recommended.map((c) => ({ channel: c.channel, tier: c.tier, note: c.note || null })),
+      globalApi: process.env.APIFY_TOKEN
+        ? "Apify active — recommended channels are also priced globally."
+        : "Set APIFY_TOKEN (or BRIGHTDATA_API_KEY) to price the 'alsoCheck' channels worldwide.",
       note: plan.matched
         ? "Country-specific priorities (cited config). No single site is always cheapest — compare these."
         : "No country match — using the global default plan.",

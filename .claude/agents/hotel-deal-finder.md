@@ -143,6 +143,19 @@ node .claude/agents/tools/find-best-rate.mjs --hotel <slug> --country MA ...
 # --country <ISO2> force le pays ; sinon lu depuis le cache de l'hôtel.
 ```
 
+**Détection auto de la ville → pays (en fonction de la demande).** Si aucun
+`--country` n'est fourni, l'orchestrateur **résout la ville** (`--city` ou la ville
+en cache) en pays via `lib/geo.mjs` (OpenStreetMap Nominatim, libre, sans clé),
+puis applique le plan pays. Les noms de ville étant ambigus, la résolution
+**classe par correspondance de nom puis `importance`** : « Djerba » → Tunisie (pas
+l'Algérie), « Cancun » → Mexique (pas Changchun). La sortie expose `geo`
+(ville/pays détectés) et `channelPlan.countrySource` (`explicit`/`cache`/`geo-detected`).
+
+**Couverture mondiale des prix.** Seuls les canaux `implemented` sont tarifés en
+direct. Pour tarifer *réellement* les champions locaux du monde entier (Agoda,
+Almosafer, Despegar…), fournis une clé : avec `APIFY_TOKEN`, `apify-hotel-rates`
+tourne pour toute demande et `channelPlan.globalApi` le signale.
+
 Sources citées dans le fichier de config (`_sources`) : Mize, EHL Insights, Forbes
 Advisor, Frommer's, PhocusWire (MENA), Aggregate Intelligence (Asie), Wikipedia
 (Despegar). **Honnêteté** : seuls les canaux `implemented:true` sont tarifés en
