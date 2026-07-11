@@ -165,12 +165,22 @@ const toEUR = (o, rate) => {
       "--query", gh.query || ids.displayName || a.hotel, "--currency", "EUR",
     ])));
     // Tier 0 breadth — Apify (only if a token is configured; else it self-skips).
+    // A direct Booking start-url (from the cached slug) is far more reliable than
+    // a name search, so build one when we have the slug.
     if (process.env.APIFY_TOKEN) {
       tiersRun.add("tier0:apify");
-      jobs.push(run("apify-hotel-rates.mjs", childArgs([
+      const apifyArgs = [
         "--query", gh.query || ids.displayName || a.hotel,
         "--checkin", s.checkin, "--checkout", s.checkout, "--currency", "EUR",
-      ])));
+      ];
+      if (ids.booking?.slug) {
+        const ages = a.children.map((age) => `&age=${age}`).join("");
+        apifyArgs.push("--start-url",
+          `https://www.booking.com/hotel/${ids.booking.slug}.html?checkin=${s.checkin}` +
+          `&checkout=${s.checkout}&group_adults=${a.adults}&group_children=${a.children.length}` +
+          `${ages}&selected_currency=EUR`);
+      }
+      jobs.push(run("apify-hotel-rates.mjs", childArgs(apifyArgs)));
     }
     const results = await Promise.all(jobs);
     const offers = results
@@ -182,8 +192,13 @@ const toEUR = (o, rate) => {
     return { window: `${s.checkin}→${s.checkout}`, offers };
   }));
 
-  // Global ranking across all windows.
-  let all = perStay.flatMap((p) => p.offers).sort((x, y) => x.eur - y.eur);
+  // Global ranking across all windows. Offers whose occupancy could NOT be
+  // verified as our exact party (e.g. Apify's headline hotel price) are kept as
+  // SIGNAL, not ranked — otherwise a cheaper 2-adult rate would masquerade as the
+  // best 2-adults-plus-child quote.
+  const rawAll = perStay.flatMap((p) => p.offers);
+  const unverifiedOccupancy = rawAll.filter((o) => o.occupancyVerified === false);
+  let all = rawAll.filter((o) => o.occupancyVerified !== false).sort((x, y) => x.eur - y.eur);
 
   // Leader + does an independent, comparable channel corroborate it (≤ tol)?
   const evaluate = (list) => {
@@ -272,6 +287,9 @@ const toEUR = (o, rate) => {
     },
     browserObserved: browserObserved.length
       ? browserObserved.slice(0, 8).map((o) => ({ channel: o.channel, priceEUR: o.eur, note: "room-unlabelled scrape — signal only" }))
+      : undefined,
+    unverifiedOccupancy: unverifiedOccupancy.length
+      ? unverifiedOccupancy.slice(0, 8).map((o) => ({ channel: o.channel, priceEUR: o.eur, note: o.occupancyNote || "occupancy not verified — signal only" }))
       : undefined,
     ranking: all.slice(0, 12).map((o) => ({
       window: o.window, channel: o.channel, board: o.board,

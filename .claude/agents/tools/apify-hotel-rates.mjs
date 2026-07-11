@@ -22,13 +22,17 @@ if (!process.env.NODE_USE_ENV_PROXY) process.env.NODE_USE_ENV_PROXY = "1";
 
 function parseArgs(argv) {
   const a = {
-    adults: 2, children: [], currency: "EUR",
+    adults: 2, children: [], currency: "EUR", startUrl: null,
     apiKey: process.env.APIFY_TOKEN || null,
-    actor: process.env.APIFY_HOTEL_ACTOR || "parseforge~hotel-booking-sites-direct-hotel-websites-scraper",
+    // Default: voyager/booking-scraper — scrapes Booking.com directly (more
+    // reliable than the Kayak-backed location scraper), supports a children
+    // count and a direct hotel startUrl. Override with --actor / APIFY_HOTEL_ACTOR.
+    actor: process.env.APIFY_HOTEL_ACTOR || "voyager~booking-scraper",
   };
   for (let i = 2; i < argv.length; i++) {
     const k = argv[i], v = argv[i + 1];
     if (k === "--query") (a.query = v), i++;
+    else if (k === "--start-url") (a.startUrl = v), i++; // precise: a Booking hotel URL
     else if (k === "--checkin") (a.checkin = v), i++;
     else if (k === "--checkout") (a.checkout = v), i++;
     else if (k === "--adults") (a.adults = Number(v)), i++;
@@ -37,8 +41,8 @@ function parseArgs(argv) {
     else if (k === "--actor") (a.actor = v), i++;
     else if (k === "--api-key") (a.apiKey = v), i++;
   }
-  if (!a.query || !a.checkin || !a.checkout) {
-    console.error("Required: --query <hotel> --checkin YYYY-MM-DD --checkout YYYY-MM-DD");
+  if ((!a.query && !a.startUrl) || !a.checkin || !a.checkout) {
+    console.error("Required: (--query <hotel> or --start-url <booking url>) --checkin YYYY-MM-DD --checkout YYYY-MM-DD");
     process.exit(2);
   }
   return a;
@@ -59,22 +63,29 @@ function normalize(rows, a) {
     const m = String(x ?? "").match(/[\d.,]+/);
     return m ? Number(m[0].replace(/,/g, "")) : null;
   };
+  const cur = (c) => (c === "€" ? "EUR" : c === "$" ? "USD" : c === "£" ? "GBP" : c || a.currency);
   const verifiedAt = new Date().toISOString();
   const offers = [];
   for (const r of rows || []) {
     const total = num(r.price ?? r.totalPrice ?? r.total ?? r.rate ?? r.amount);
     if (total == null) continue;
+    // HONESTY: this actor returns a hotel HEADLINE price and does not expose the
+    // exact room/occupancy it priced (room-level prices come back null, child
+    // ages aren't applied). So confidence is capped and occupancy is flagged
+    // unverified — never fold this in as a guaranteed same-occupancy quote.
     offers.push({
-      channel: r.source || r.site || r.provider || r.ota || "Apify",
+      channel: r.source || r.site || r.provider || r.ota || "Booking.com (Apify)",
       hotel: r.hotelName || r.name || a.query,
       room: r.roomType || r.room || "",
       board: r.board || r.mealPlan || "unknown",
       checkin: a.checkin, checkout: a.checkout,
-      total, currency: r.currency || a.currency,
+      total, currency: cur(r.currency),
       cancellation: r.freeCancellation ? "free" : "unknown",
-      status: "verified", confidence: 0.8,
+      status: "verified", confidence: 0.6,
+      occupancyVerified: false,
+      occupancyNote: `Headline hotel price; actor applies adults=${a.adults}, children=${a.children.length} (ages not passed) — may not match a ${a.adults}+${a.children.length} triple.`,
       sourceUrl: r.url || r.link || null,
-      verifiedAt, raw: r,
+      verifiedAt,
     });
   }
   return offers.sort((x, y) => (x.total ?? 1e12) - (y.total ?? 1e12));
@@ -89,12 +100,14 @@ function normalize(rows, a) {
     });
     process.exit(1);
   }
+  // Schema for voyager~booking-scraper. A direct hotel --start-url is far more
+  // reliable than a name search (Booking's destination search misses exact hotel
+  // names, same as Google). children is a COUNT here, not ages.
   const input = {
-    search: a.query, query: a.query,
     checkIn: a.checkin, checkOut: a.checkout,
-    checkInDate: a.checkin, checkOutDate: a.checkout,
-    adults: a.adults, children: a.children.length, childrenAges: a.children,
-    currency: a.currency, maxItems: 25,
+    adults: a.adults, children: a.children.length, rooms: 1,
+    currency: a.currency, maxItems: 10,
+    ...(a.startUrl ? { startUrls: [{ url: a.startUrl }] } : { search: a.query }),
   };
   const url =
     `https://api.apify.com/v2/acts/${encodeURIComponent(a.actor)}` +
