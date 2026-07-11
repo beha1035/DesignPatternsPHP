@@ -11,7 +11,12 @@
 // Usage:
 //   node google-hotels-rate.mjs --checkin 2026-07-15 --checkout 2026-07-17 \
 //     --adults 2 --children 10 [--currency EUR] [--query "La Cigale Tabarka"] \
-//     [--gl tn] [--hl fr] [--property-token TOKEN]
+//     [--location "Tabarka"] [--gl tn] [--hl fr] [--property-token TOKEN]
+//
+// If the exact --query returns no property, we retry with "<query> hotel" and a
+// "hotels <place>" destination search (place = --location or the query's last
+// word), then fuzzy-match by name. Note: Google Hotels rejects some currencies
+// (e.g. TND) — use EUR/USD. TND-only resorts may also have no dated rate at all.
 //
 // Output: one JSON object on stdout matching the agent's offer schema, with
 // status "verified" for live-read prices. Never fabricates: missing key /
@@ -28,7 +33,7 @@ const BASE = "https://serpapi.com/search.json";
 function parseArgs(argv) {
   const a = {
     adults: 2, children: [], currency: "EUR",
-    query: "La Cigale Tabarka", gl: "tn", hl: "fr",
+    query: "La Cigale Tabarka", location: null, gl: "tn", hl: "fr",
     apiKey: process.env.SERPAPI_KEY || null, propertyToken: null,
   };
   for (let i = 2; i < argv.length; i++) {
@@ -39,6 +44,7 @@ function parseArgs(argv) {
     else if (k === "--children") (a.children = v.split(",").filter(Boolean).map(Number)), i++;
     else if (k === "--currency") (a.currency = v), i++;
     else if (k === "--query") (a.query = v), i++;
+    else if (k === "--location") (a.location = v), i++;
     else if (k === "--gl") (a.gl = v), i++;
     else if (k === "--hl") (a.hl = v), i++;
     else if (k === "--api-key") (a.apiKey = v), i++;
@@ -87,6 +93,43 @@ async function call(params) {
 
 const num = (x) =>
   typeof x === "number" ? x : x && typeof x.extracted_lowest === "number" ? x.extracted_lowest : null;
+
+// Significant (accent-folded, >2 char) words for fuzzy name/query matching.
+const sig = (s) =>
+  ((s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").match(/[a-z0-9]+/g) || [])
+    .filter((w) => w.length > 2);
+
+// How many query words appear in a property name.
+function matchScore(name, qWords) {
+  const nameWords = new Set(sig(name));
+  return qWords.reduce((n, w) => n + (nameWords.has(w) ? 1 : 0), 0);
+}
+
+// Find the property. Google Hotels is picky: an exact hotel-name query often
+// returns 0 results while a broader ("... hotel") or destination ("hotels
+// <place>") query returns it. Try each in turn, fuzzy-matching by query words.
+async function findProperty(a) {
+  const qWords = sig(a.query);
+  const place = a.location || a.query.split(/\s+/).slice(-1)[0]; // last token as a hint
+  const seen = new Set();
+  const candidates = [a.query, `${a.query} hotel`, `hotels ${place}`].filter(
+    (q) => q && !seen.has(q) && seen.add(q)
+  );
+  for (const q of candidates) {
+    const props = (await call(buildParams(a, { q }))).properties || [];
+    if (!props.length) continue;
+    let best = null, bestScore = 0;
+    for (const p of props) {
+      const s = matchScore(p.name, qWords);
+      if (s > bestScore) (best = p), (bestScore = s);
+    }
+    // A positive word-overlap means a real match; otherwise widen the query.
+    if (best && bestScore > 0) return { match: best, via: q };
+    // Exact single-candidate case with no overlap: accept the top result.
+    if (candidates.length === 1) return { match: props[0], via: q };
+  }
+  return { match: null, via: null };
+}
 
 // Map a Google Hotels property's per-source prices to the agent's offer schema.
 function normalize(prop, a) {
@@ -143,16 +186,21 @@ function normalize(prop, a) {
   try {
     let property;
     if (a.propertyToken) {
-      property = await call(buildParams(a, { property_token: a.propertyToken }));
+      // The google_hotels engine requires `q` even alongside property_token.
+      property = await call(buildParams(a, { q: a.query, property_token: a.propertyToken }));
     } else {
-      const search = await call(buildParams(a, { q: a.query }));
-      const props = search.properties || [];
-      // Prefer an exact-ish La Cigale match; else the first result.
-      const match = props.find((p) => /cigale/i.test(p.name || "")) || props[0];
-      if (!match) fail(query, `No property found for "${a.query}". Try a more specific --query.`, "no_price");
-      // Re-query with the property_token for full per-source pricing.
+      const { match, via } = await findProperty(a);
+      if (!match) {
+        fail(
+          query,
+          `No property found for "${a.query}" (tried the exact name, "… hotel", and a "hotels <place>" fallback). Try --query with the full hotel name, or --location "<city>".`,
+          "no_price"
+        );
+      }
+      // Re-query with the property_token (plus the q that surfaced it) for full
+      // per-source pricing.
       property = match.property_token
-        ? await call(buildParams(a, { property_token: match.property_token }))
+        ? await call(buildParams(a, { q: via, property_token: match.property_token }))
         : match;
     }
     const offers = normalize(property, a);
@@ -165,6 +213,13 @@ function normalize(prop, a) {
     });
   } catch (e) {
     const msg = String(e?.message || e);
+    if (/Unsupported .* for currency/i.test(msg)) {
+      fail(
+        query,
+        `Google Hotels does not support currency "${a.currency}" (e.g. TND is unsupported). Re-run with --currency EUR or USD and convert afterwards.`,
+        "error"
+      );
+    }
     const blocked = /403|407|ENOTFOUND|ECONNREFUSED|fetch failed|tunnel|allowlist/i.test(msg);
     fail(query, msg, blocked ? "blocked" : "error");
   }
