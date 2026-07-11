@@ -78,12 +78,19 @@ function extractPairs(htmlText) {
 // vs "Residence Mehari Tabarka"). Strip city tokens from the wanted set.
 function bestMatch(pairs, name, city = "") {
   const cityWords = new Set(sig(city));
-  const want = new Set(sig(name).filter((w) => !cityWords.has(w)));
-  if (!want.size) sig(name).forEach((w) => want.add(w)); // name == city fallback
+  const distinct = sig(name).filter((w) => !cityWords.has(w));
+  const want = new Set(distinct.length ? distinct : sig(name));
+  // Anchor = the query's first distinctive word (brand/name), e.g. "riu",
+  // "cigale", "marhaba". The matched hotel MUST contain it — otherwise a shared
+  // generic word ("palace", "beach") would confidently resolve the WRONG hotel
+  // (Riu Palace -> Radisson Blu Palace). Better to return null (unresolved).
+  const anchor = distinct[0] || [...want][0] || null;
   let best = null, bestScore = 0;
   for (const [id, nm] of pairs) {
     if (!nm) continue;
-    const score = sig(nm).reduce((n, w) => n + (want.has(w) ? 1 : 0), 0);
+    const words = new Set(sig(nm));
+    if (anchor && !words.has(anchor)) continue; // hard gate on the anchor word
+    const score = [...want].reduce((n, w) => n + (words.has(w) ? 1 : 0), 0);
     if (score > bestScore) { best = { id, name: nm }; bestScore = score; }
   }
   return bestScore > 0 ? best : null;

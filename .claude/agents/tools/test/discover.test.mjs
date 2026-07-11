@@ -33,6 +33,13 @@ test("bestMatch returns null when nothing overlaps", () => {
   assert.equal(bestMatch(extractPairs(LIST), "Four Seasons Paris", "Paris"), null);
 });
 
+test("bestMatch refuses a generic-word false positive (anchor gate)", () => {
+  // "Riu Palace" must NOT resolve to "Radisson Blu Palace" on the shared word
+  // "palace" — the anchor "riu" is absent, so it stays unresolved.
+  const pairs = new Map([["18", "Radisson Blu Palace Resort et Thalasso"], ["7", "Marhaba Beach"]]);
+  assert.equal(bestMatch(pairs, "Riu Palace", "Djerba"), null);
+});
+
 test("slug/citySlug normalize accents and spaces", () => {
   assert.equal(slugify("La Cigale Tabarka"), "la-cigale-tabarka");
   assert.equal(citySlug("Hammamet"), "hammamet");
