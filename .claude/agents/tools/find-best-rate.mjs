@@ -24,6 +24,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { getRate } from "./lib/fx.mjs";
+import { planForCountry } from "./lib/country-router.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const AGREE_TOLERANCE = 0.03; // 3% -> two channels "agree" on the leader.
@@ -57,6 +58,7 @@ function parseArgs(argv) {
     else if (k === "--escalate") a.escalate = true;
     else if (k === "--name") (a.name = v), i++;   // for on-the-fly discovery
     else if (k === "--city") (a.city = v), i++;
+    else if (k === "--country") (a.country = v), i++;
   }
   return a;
 }
@@ -112,6 +114,10 @@ const toEUR = (o, rate) => {
     if (cache[a.hotel]) discovered.push(`discovered:${a.hotel}`);
   }
   const ids = cache[a.hotel] || {};
+
+  // Country-aware channel plan (cited config): which channels to prioritise for
+  // this hotel's country, split into what we can price now vs. what to check.
+  const plan = await planForCountry(a.country || ids.country || null);
   const tb = ids.tunisiebooking || {};
   const gh = ids.googleHotels || {};
 
@@ -227,6 +233,15 @@ const toEUR = (o, rate) => {
     },
     generatedAt: new Date().toISOString(),
     fx: { pair: "EUR/TND", rate, stale: fx.stale, source: fx.source },
+    channelPlan: {
+      country: plan.country, region: plan.region, matched: plan.matched,
+      pricedNow: plan.actionable.map((c) => c.channel),
+      alsoCheck: plan.recommended.map((c) => ({ channel: c.channel, tier: c.tier, note: c.note || null })),
+      note: plan.matched
+        ? "Country-specific priorities (cited config). No single site is always cheapest — compare these."
+        : "No country match — using the global default plan.",
+      sources: plan.sources,
+    },
     tiersRun: [...discovered, ...tiersRun, ...escalationRan],
     shortCircuited: corroborated,
     escalationRan,

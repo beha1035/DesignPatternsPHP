@@ -1,0 +1,161 @@
+{
+  "_about": "Per-country channel priorities for the hotel-deal-finder. There is NO universal cheapest booking site — the lowest final price depends on country, hotel, dates, and stacked loyalty/cashback (Forbes/Frommer's/Upgraded Points 2026). So this file lists which channels to CHECK FIRST per country, ordered by local strength, not a single 'winner'. Each channel is tagged with the cascade tier and whether a browserless tool exists yet (implemented) or it is a recommended manual/keyed check.",
+  "_sources": [
+    { "title": "Mize — OTA market share across the world", "url": "https://mize.tech/blog/online-travel-agencies-market-share-across-the-world/" },
+    { "title": "EHL Insights — Hotel OTAs (regional leaders)", "url": "https://insights.ehl.edu/hotel-otas" },
+    { "title": "Forbes Advisor — Best hotel booking sites 2026", "url": "https://www.forbes.com/advisor/credit-cards/travel-rewards/best-hotel-booking-sites/" },
+    { "title": "Frommer's — Best & worst hotel booking sites 2026", "url": "https://www.frommers.com/slideshows/819303-best-and-worst-hotel-booking-sites-for-2026/" },
+    { "title": "PhocusWire — Middle East distribution series", "url": "https://www.phocuswire.com/Middle-East-series-part-3-distribution" },
+    { "title": "MenaBytes — Travel websites MENA", "url": "https://www.menabytes.com/travel-websites-mena/" },
+    { "title": "Aggregate Intelligence — Asia's top OTAs (PDF)", "url": "https://aggregateintelligence.com/wp-content/uploads/2025/04/What-Asias-Top-OTAs-Offer-A-Deep-Dive.pdf" },
+    { "title": "Despegar — Wikipedia (LatAm leader)", "url": "https://en.wikipedia.org/wiki/Despegar" }
+  ],
+  "_tierLegend": {
+    "0": "structured API (google-hotels-rate; apify with key) — fast, broad",
+    "1": "browserless HTTP tool (e.g. tunisiebooking-rate) — fast, free, local depth",
+    "2": "managed unblocker (brightdata) — keyed",
+    "3": "self-hosted browser (validate-rate) — last resort"
+  },
+
+  "default": {
+    "note": "Global baseline where no strong local OTA beats the giants (most of Europe & North America): compare metasearch + Booking (Genius when logged in) + direct rate.",
+    "channels": [
+      { "channel": "Google Hotels", "tier": 0, "tool": "google-hotels-rate.mjs", "implemented": true, "note": "free metasearch across sources" },
+      { "channel": "Booking.com", "tier": 3, "implemented": false, "note": "largest inventory; Genius member discount when signed in" },
+      { "channel": "Direct hotel site", "tier": 3, "implemented": false, "note": "often matches/beats OTAs with member rates (Frommer's)" },
+      { "channel": "Trivago", "tier": 3, "implemented": false, "note": "metasearch across 400+ sites" }
+    ]
+  },
+
+  "countries": {
+    "TN": {
+      "region": "North Africa", "displayName": "Tunisia",
+      "channels": [
+        { "channel": "TunisieBooking", "tier": 1, "tool": "tunisiebooking-rate.mjs", "implemented": true, "note": "local leader, typically cheapest for Tunisian resorts; invisible to Google Hotels" },
+        { "channel": "Traveltodo", "tier": 1, "implemented": false, "note": "second Tunisian specialist (ColdFusion endpoint not yet cracked)" },
+        { "channel": "Google Hotels", "tier": 0, "tool": "google-hotels-rate.mjs", "implemented": true, "note": "thin coverage for TN resorts — often empty" },
+        { "channel": "Booking.com", "tier": 3, "implemented": false }
+      ]
+    },
+    "MA": {
+      "region": "North Africa", "displayName": "Morocco",
+      "channels": [
+        { "channel": "Agoda", "tier": 0, "implemented": false, "note": "very deep Morocco inventory (44k+ properties), aggressive budget pricing" },
+        { "channel": "Google Hotels", "tier": 0, "tool": "google-hotels-rate.mjs", "implemented": true },
+        { "channel": "Booking.com", "tier": 3, "implemented": false },
+        { "channel": "Direct hotel site", "tier": 3, "implemented": false }
+      ]
+    },
+    "EG": {
+      "region": "North Africa / MENA", "displayName": "Egypt",
+      "channels": [
+        { "channel": "Agoda", "tier": 0, "implemented": false },
+        { "channel": "Booking.com", "tier": 3, "implemented": false },
+        { "channel": "Google Hotels", "tier": 0, "tool": "google-hotels-rate.mjs", "implemented": true },
+        { "channel": "Almosafer", "tier": 3, "implemented": false, "note": "MENA leader, GCC-focused" }
+      ]
+    },
+    "SA": {
+      "region": "Gulf / MENA", "displayName": "Saudi Arabia",
+      "channels": [
+        { "channel": "Almosafer", "tier": 3, "implemented": false, "note": "Saudi Arabia's leading OTA (World Travel Awards 2025)" },
+        { "channel": "Wego", "tier": 3, "implemented": false, "note": "leading MENA metasearch" },
+        { "channel": "Booking.com", "tier": 3, "implemented": false },
+        { "channel": "Google Hotels", "tier": 0, "tool": "google-hotels-rate.mjs", "implemented": true }
+      ]
+    },
+    "AE": {
+      "region": "Gulf / MENA", "displayName": "United Arab Emirates",
+      "channels": [
+        { "channel": "Almosafer", "tier": 3, "implemented": false },
+        { "channel": "Wego", "tier": 3, "implemented": false },
+        { "channel": "Booking.com", "tier": 3, "implemented": false },
+        { "channel": "Google Hotels", "tier": 0, "tool": "google-hotels-rate.mjs", "implemented": true }
+      ]
+    },
+    "KW": {
+      "region": "Gulf / MENA", "displayName": "Kuwait",
+      "channels": [
+        { "channel": "Rehlat", "tier": 3, "implemented": false, "note": "Kuwait's leading OTA" },
+        { "channel": "Almosafer", "tier": 3, "implemented": false },
+        { "channel": "Wego", "tier": 3, "implemented": false },
+        { "channel": "Google Hotels", "tier": 0, "tool": "google-hotels-rate.mjs", "implemented": true }
+      ]
+    },
+    "CN": {
+      "region": "East Asia", "displayName": "China",
+      "channels": [
+        { "channel": "Trip.com", "tier": 3, "implemented": false, "note": "Ctrip/Trip.com — dominant in China" },
+        { "channel": "Agoda", "tier": 0, "implemented": false },
+        { "channel": "Google Hotels", "tier": 0, "tool": "google-hotels-rate.mjs", "implemented": true }
+      ]
+    },
+    "IN": {
+      "region": "South Asia", "displayName": "India",
+      "channels": [
+        { "channel": "MakeMyTrip", "tier": 3, "implemented": false, "note": "dominant Indian OTA" },
+        { "channel": "Agoda", "tier": 0, "implemented": false },
+        { "channel": "Booking.com", "tier": 3, "implemented": false },
+        { "channel": "Google Hotels", "tier": 0, "tool": "google-hotels-rate.mjs", "implemented": true }
+      ]
+    },
+    "TH": {
+      "region": "Southeast Asia", "displayName": "Thailand",
+      "channels": [
+        { "channel": "Agoda", "tier": 0, "implemented": false, "note": "15-25% cheaper in SE Asia for same room (2026 comparisons)" },
+        { "channel": "Traveloka", "tier": 3, "implemented": false },
+        { "channel": "Trip.com", "tier": 3, "implemented": false },
+        { "channel": "Google Hotels", "tier": 0, "tool": "google-hotels-rate.mjs", "implemented": true }
+      ]
+    },
+    "ID": {
+      "region": "Southeast Asia", "displayName": "Indonesia",
+      "channels": [
+        { "channel": "Traveloka", "tier": 3, "implemented": false, "note": "SE Asia leader, strong in Indonesia" },
+        { "channel": "Agoda", "tier": 0, "implemented": false },
+        { "channel": "Google Hotels", "tier": 0, "tool": "google-hotels-rate.mjs", "implemented": true }
+      ]
+    },
+    "VN": {
+      "region": "Southeast Asia", "displayName": "Vietnam",
+      "channels": [
+        { "channel": "Agoda", "tier": 0, "implemented": false },
+        { "channel": "Traveloka", "tier": 3, "implemented": false },
+        { "channel": "Google Hotels", "tier": 0, "tool": "google-hotels-rate.mjs", "implemented": true }
+      ]
+    },
+    "JP": {
+      "region": "East Asia", "displayName": "Japan",
+      "channels": [
+        { "channel": "Agoda", "tier": 0, "implemented": false, "note": "cheaper for Tokyo per 2026 comparisons" },
+        { "channel": "Booking.com", "tier": 3, "implemented": false },
+        { "channel": "Trip.com", "tier": 3, "implemented": false },
+        { "channel": "Google Hotels", "tier": 0, "tool": "google-hotels-rate.mjs", "implemented": true }
+      ]
+    },
+    "BR": {
+      "region": "Latin America", "displayName": "Brazil",
+      "channels": [
+        { "channel": "Decolar", "tier": 3, "implemented": false, "note": "Despegar's Brazil brand — regional leader" },
+        { "channel": "Booking.com", "tier": 3, "implemented": false },
+        { "channel": "Google Hotels", "tier": 0, "tool": "google-hotels-rate.mjs", "implemented": true }
+      ]
+    },
+    "MX": {
+      "region": "Latin America", "displayName": "Mexico",
+      "channels": [
+        { "channel": "Despegar", "tier": 3, "implemented": false, "note": "LatAm leader" },
+        { "channel": "Booking.com", "tier": 3, "implemented": false },
+        { "channel": "Google Hotels", "tier": 0, "tool": "google-hotels-rate.mjs", "implemented": true }
+      ]
+    },
+    "AR": {
+      "region": "Latin America", "displayName": "Argentina",
+      "channels": [
+        { "channel": "Despegar", "tier": 3, "implemented": false, "note": "first & leading LatAm OTA" },
+        { "channel": "Booking.com", "tier": 3, "implemented": false },
+        { "channel": "Google Hotels", "tier": 0, "tool": "google-hotels-rate.mjs", "implemented": true }
+      ]
+    }
+  }
+}

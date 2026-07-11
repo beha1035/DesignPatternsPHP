@@ -117,6 +117,38 @@ jamais deviné pour ne pas interroger le mauvais hôtel).
 > cette dérive. Canaux browserless supplémentaires reconnus mais non encore
 > livrés : **Traveltodo** (`hotelId=1513`, endpoint de prix à confirmer).
 
+### Config pays → canaux (choix des sources selon le pays)
+
+Il n'existe **aucun site le moins cher universel** : le prix final dépend du pays,
+de l'hôtel, des dates et des promos cumulées (Forbes / Frommer's / Upgraded Points
+2026). L'agent choisit donc **quels canaux vérifier en priorité selon le pays** via
+`tools/config/country-channels.json` (sourcé), exploité par `lib/country-router.mjs`.
+
+L'orchestrateur expose un `channelPlan` : `pricedNow` (canaux tarifés
+automatiquement, outil implémenté) et `alsoCheck` (champions locaux à vérifier, pas
+encore outillés / clé requise). Exemples issus de la recherche sourcée :
+
+| Pays / région | Canaux prioritaires | Source |
+|---|---|---|
+| **Tunisie** | TunisieBooking, Traveltodo | spécialistes locaux, moins chers |
+| **Maroc / Égypte** | Agoda (très profond), Booking | Agoda 44k+ hôtels Maroc |
+| **Golfe (SA/AE/KW)** | Almosafer, Wego, Rehlat | leaders MENA (World Travel Awards) |
+| **Chine / Inde** | Trip.com (Ctrip) / MakeMyTrip | dominants nationaux |
+| **Asie du SE / Japon** | Agoda, Traveloka | Agoda 15-25 % moins cher |
+| **Amérique latine** | Despegar / Decolar (Brésil) | leader régional |
+| **Europe / Am. Nord** | Booking (Genius) + site direct + métamoteur | pas d'OTA local dominant |
+
+```bash
+node .claude/agents/tools/find-best-rate.mjs --hotel <slug> --country MA ...
+# --country <ISO2> force le pays ; sinon lu depuis le cache de l'hôtel.
+```
+
+Sources citées dans le fichier de config (`_sources`) : Mize, EHL Insights, Forbes
+Advisor, Frommer's, PhocusWire (MENA), Aggregate Intelligence (Asie), Wikipedia
+(Despegar). **Honnêteté** : seuls les canaux `implemented:true` sont tarifés en
+direct ; les autres sont **recommandés** (à vérifier au navigateur / via une clé
+API à couverture mondiale — Apify/Bright Data), jamais présentés comme vérifiés.
+
 ### Deux étages : découverte puis validation
 
 Sépare toujours **découverte** (trouver des offres candidates via `WebSearch`) et
