@@ -94,12 +94,18 @@ les mots **distinctifs** en ignorant le nom de ville partagé) et la requête
 Google Hotels, puis écrit dans le cache. Booking/Trip restent `null` (best-effort,
 jamais deviné pour ne pas interroger le mauvais hôtel).
 
-- **`--escalate`** : au lieu de seulement *conseiller* l'escalade, l'orchestrateur
-  **lance vraiment** le navigateur (`validate-rate`, Tier 3) quand le leader reste
-  mono-source ou introuvable, puis re-teste la corroboration. Le Tier 2
-  (`brightdata-unlock`) reste un **récupérateur de page manuel** : parser du HTML
-  OTA arbitraire en prix « verified » serait précisément le genre de faille
-  silencieuse que l'agent doit éviter.
+- **`--escalate`** : quand le leader est mono-source, l'orchestrateur **lance le
+  navigateur** (`validate-rate`, Tier 3) pour le **CONFIRMER** — pas pour inventer
+  moins cher. `validate-rate` renvoie des prix bruts **non étiquetés par chambre**
+  (ex. `['€341','€797','€456',…]`) : en prendre le min fabriquerait un « meilleur
+  prix » depuis une chambre non comparable (tarif 2 adultes, etc.). L'escalade ne
+  s'en sert donc que comme **corroboration** — un prix observé sur un AUTRE canal
+  tombe-t-il à ±3 % du leader ? Si oui, `corroboratedBy` le prouve ; sinon le
+  leader reste « meilleur prix trouvé, non corroboré », honnêtement. Les prix
+  observés sont exposés dans `browserObserved` (signal, jamais classés). Le Tier 2
+  (`brightdata-unlock`) reste un récupérateur de page manuel pour la même raison.
+  *(Nécessite le navigateur : `executablePath` + proxy explicites — voir
+  `validate-rate` ; sans quoi Chromium reset la connexion sur ECH.)*
 - **Corroboration honnête** : deux sources ne « concordent » que si **même régime
   et classe de chambre comparable** (pas juste un prix proche).
 - L'orchestrateur signale dans `escalation` le tier exact à lancer. Les IDs par

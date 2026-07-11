@@ -178,29 +178,32 @@ const toEUR = (o, rate) => {
   };
   let { best, corroborated } = evaluate(all);
 
-  // Auto-escalation (opt-in --escalate): when the leader is missing or
-  // single-sourced, actually RUN the next tier instead of only advising it.
-  // Tier 3 (self-hosted browser) is used automatically because it returns
-  // structured, comparable offers; Tier 2 (brightdata-unlock) stays a manual
-  // page-fetch — auto-parsing arbitrary OTA HTML into a "verified" price would
-  // be the kind of silent unreliability this agent must avoid.
+  // Auto-escalation (opt-in --escalate): when the leader is single-sourced, RUN
+  // the browser (Tier 3) to CONFIRM it — not to invent a cheaper one. validate-
+  // rate returns raw, room-UNLABELLED prices scraped off the page; picking their
+  // min would fabricate a "best" from a non-comparable room (e.g. a 2-pax rate).
+  // So we only use them as corroboration: does any observed price on ANOTHER
+  // channel land within tolerance of our leader? That confirms without lying.
+  const eurNum = (s) => {
+    const m = String(s).match(/[\d][\d.,]*/);
+    return m ? Number(m[0].replace(/\s/g, "").replace(/,/g, "")) : null;
+  };
   const escalationRan = [];
-  if (a.escalate && (!best || !corroborated)) {
-    const target = best ? best.window : all[0]?.window || `${stays[0].checkin}→${stays[0].checkout}`;
-    const [ci, co] = target.split("→");
+  let browserObserved = [];
+  let corroboratedBy = null;
+  if (a.escalate && best && !corroborated) {
+    const [ci, co] = best.window.split("→");
     escalationRan.push("tier3:validate-rate");
     const vr = await run("validate-rate.mjs", childArgs(["--checkin", ci, "--checkout", co, "--currency", "EUR"]));
-    const folded = (vr?.results || [])
-      .filter((r) => r.status === "verified" && Array.isArray(r.prices) && r.prices.length)
-      .map((r) => {
-        const total = Math.min(...r.prices.map(Number).filter((x) => x > 0));
-        return { channel: r.channel, room: "", board: "unknown", currency: "EUR",
-          total, eur: total, window: target, sourceUrl: r.url, status: "verified", confidence: 0.85 };
-      });
-    if (folded.length) {
-      all = [...all, ...folded].sort((x, y) => x.eur - y.eur);
-      ({ best, corroborated } = evaluate(all));
-    }
+    browserObserved = (vr?.results || [])
+      .filter((r) => r.status === "verified" && Array.isArray(r.prices))
+      .flatMap((r) => r.prices.map((p) => ({ channel: r.channel, url: r.url, eur: eurNum(p) })))
+      .filter((o) => o.eur > 0);
+    const match = browserObserved.find(
+      (o) => o.channel !== best.channel &&
+        Math.abs(o.eur - best.eur) / best.eur <= AGREE_TOLERANCE
+    );
+    if (match) { corroborated = true; corroboratedBy = match; }
   }
 
   const distinctChannels = new Set(all.map((o) => o.channel));
@@ -233,7 +236,11 @@ const toEUR = (o, rate) => {
       window: best.window, totalEUR: best.eur,
       totalTND: best.currency === "TND" ? best.total : null,
       sourceUrl: best.sourceUrl, corroborated,
+      corroboratedBy: corroboratedBy && { channel: corroboratedBy.channel, priceEUR: corroboratedBy.eur },
     },
+    browserObserved: browserObserved.length
+      ? browserObserved.slice(0, 8).map((o) => ({ channel: o.channel, priceEUR: o.eur, note: "room-unlabelled scrape — signal only" }))
+      : undefined,
     ranking: all.slice(0, 12).map((o) => ({
       window: o.window, channel: o.channel, board: o.board,
       totalEUR: o.eur, room: o.room,
