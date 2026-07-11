@@ -78,12 +78,26 @@ dès que deux canaux indépendants concordent** (±3 %).
 ```bash
 node .claude/agents/tools/find-best-rate.mjs \
   --hotel la-cigale-tabarka --window 2026-07-14..2026-07-20 --nights 2 \
-  --adults 2 --children 10 --eur-rate 3.37
+  --adults 2 --children 10 [--escalate]
+# Taux EUR/TND live par défaut (open.er-api.com) ; --eur-rate le fige.
 ```
 
-L'orchestrateur signale dans `escalation` le tier exact à lancer si le meilleur
-prix reste mono-source ou introuvable. Les IDs d'hôtel par canal sont mis en
-cache dans `tools/cache/hotel-ids.json` (les runs suivants sautent la découverte).
+- **`--escalate`** : au lieu de seulement *conseiller* l'escalade, l'orchestrateur
+  **lance vraiment** le navigateur (`validate-rate`, Tier 3) quand le leader reste
+  mono-source ou introuvable, puis re-teste la corroboration. Le Tier 2
+  (`brightdata-unlock`) reste un **récupérateur de page manuel** : parser du HTML
+  OTA arbitraire en prix « verified » serait précisément le genre de faille
+  silencieuse que l'agent doit éviter.
+- **Corroboration honnête** : deux sources ne « concordent » que si **même régime
+  et classe de chambre comparable** (pas juste un prix proche).
+- L'orchestrateur signale dans `escalation` le tier exact à lancer. Les IDs par
+  canal sont en cache dans `tools/cache/hotel-ids.json`.
+
+> **Fiabilité** : `tunisiebooking-rate` émet `status:"drift"` (exit 3) si le site
+> renvoie des chambres mais plus aucun prix parsable — jamais un `no_price`
+> silencieux. Les tests `tools/test/` (fixtures HTML, `node --test`) attrapent
+> cette dérive. Canaux browserless supplémentaires reconnus mais non encore
+> livrés : **Traveltodo** (`hotelId=1513`, endpoint de prix à confirmer).
 
 ### Deux étages : découverte puis validation
 
@@ -165,11 +179,13 @@ cachés**. L'outil rejoue cet appel — pas de Chromium.
 ```bash
 node .claude/agents/tools/tunisiebooking-rate.mjs \
   --checkin 2026-07-14 --checkout 2026-07-16 --adults 2 --children 10 \
-  --hotel-id 354 --ville Tabarka
+  --hotel-id 354 --ville Tabarka [--boards lpd,dp]
 ```
 
 - Renvoie des offres `verified` (`confidence 0.9`) au schéma de l'agent, TND, avec
   les **2 % de frais de dossier** inclus dans `total` (et `baseBeforeFee`).
+- **Régimes** : `--boards` (défaut `lpd,dp` = petit-déj + demi-pension) ; un appel
+  par régime, offres fusionnées. (`pension`, `ai` possibles si l'hôtel les vend.)
 - `--hotel-id` = l'`id_hotel_xml` TunisieBooking (La Cigale = `354`, en cache).
 - Honnête : `no_price` si l'hôtel est indisponible ces dates, `blocked` si l'hôte
   est filtré par l'egress.

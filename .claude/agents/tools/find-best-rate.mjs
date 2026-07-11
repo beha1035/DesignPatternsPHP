@@ -54,6 +54,7 @@ function parseArgs(argv) {
     else if (k === "--adults") (a.adults = Number(v)), i++;
     else if (k === "--children") (a.children = v.split(",").filter(Boolean).map(Number)), i++;
     else if (k === "--eur-rate") (a.eurRate = Number(v)), i++;
+    else if (k === "--escalate") a.escalate = true;
   }
   return a;
 }
@@ -153,26 +154,54 @@ const toEUR = (o, rate) => {
   }));
 
   // Global ranking across all windows.
-  const all = perStay.flatMap((p) => p.offers).sort((x, y) => x.eur - y.eur);
-  const best = all[0] || null;
+  let all = perStay.flatMap((p) => p.offers).sort((x, y) => x.eur - y.eur);
 
-  // Short-circuit test: does a second, independent channel corroborate the
-  // leader's price within tolerance? If so, no escalation needed.
-  let corroborated = false;
-  if (best) {
-    corroborated = all.some(
-      (o) => o.channel !== best.channel &&
-        comparable(o, best) &&
-        Math.abs(o.eur - best.eur) / best.eur <= AGREE_TOLERANCE
-    );
+  // Leader + does an independent, comparable channel corroborate it (≤ tol)?
+  const evaluate = (list) => {
+    const b = list[0] || null;
+    const corr = b
+      ? list.some((o) => o.channel !== b.channel && comparable(o, b) &&
+          Math.abs(o.eur - b.eur) / b.eur <= AGREE_TOLERANCE)
+      : false;
+    return { best: b, corroborated: corr };
+  };
+  let { best, corroborated } = evaluate(all);
+
+  // Auto-escalation (opt-in --escalate): when the leader is missing or
+  // single-sourced, actually RUN the next tier instead of only advising it.
+  // Tier 3 (self-hosted browser) is used automatically because it returns
+  // structured, comparable offers; Tier 2 (brightdata-unlock) stays a manual
+  // page-fetch — auto-parsing arbitrary OTA HTML into a "verified" price would
+  // be the kind of silent unreliability this agent must avoid.
+  const escalationRan = [];
+  if (a.escalate && (!best || !corroborated)) {
+    const target = best ? best.window : all[0]?.window || `${stays[0].checkin}→${stays[0].checkout}`;
+    const [ci, co] = target.split("→");
+    escalationRan.push("tier3:validate-rate");
+    const vr = await run("validate-rate.mjs", childArgs(["--checkin", ci, "--checkout", co, "--currency", "EUR"]));
+    const folded = (vr?.results || [])
+      .filter((r) => r.status === "verified" && Array.isArray(r.prices) && r.prices.length)
+      .map((r) => {
+        const total = Math.min(...r.prices.map(Number).filter((x) => x > 0));
+        return { channel: r.channel, room: "", board: "unknown", currency: "EUR",
+          total, eur: total, window: target, sourceUrl: r.url, status: "verified", confidence: 0.85 };
+      });
+    if (folded.length) {
+      all = [...all, ...folded].sort((x, y) => x.eur - y.eur);
+      ({ best, corroborated } = evaluate(all));
+    }
   }
 
   const distinctChannels = new Set(all.map((o) => o.channel));
   const escalation = [];
   if (!best) {
-    escalation.push("No verified rate from Tier 0/1. Run Tier 2 (brightdata-unlock.mjs on Booking/Agoda deep links) or the self-hosted browser (validate-rate.mjs).");
+    escalation.push(a.escalate
+      ? "No verified rate even after Tier 3 escalation. The hotel may be unavailable for these dates on every reachable channel."
+      : "No verified rate from Tier 0/1. Re-run with --escalate to auto-run the browser (validate-rate.mjs), or fetch a channel via brightdata-unlock.mjs.");
   } else if (!corroborated) {
-    escalation.push(`Leader ${best.channel} @ €${best.eur} is single-sourced. Corroborate with Tier 2 (brightdata-unlock.mjs) on a second channel before trusting it.`);
+    escalation.push(a.escalate
+      ? `Leader ${best.channel} @ €${best.eur} stayed single-sourced after escalation — trust it as the best FOUND price, but no second channel confirmed it.`
+      : `Leader ${best.channel} @ €${best.eur} is single-sourced. Re-run with --escalate to auto-corroborate via the browser, or run brightdata-unlock.mjs on a second channel.`);
   }
 
   emit({
@@ -184,8 +213,9 @@ const toEUR = (o, rate) => {
     },
     generatedAt: new Date().toISOString(),
     fx: { pair: "EUR/TND", rate, stale: fx.stale, source: fx.source },
-    tiersRun: [...tiersRun],
+    tiersRun: [...tiersRun, ...escalationRan],
     shortCircuited: corroborated,
+    escalationRan,
     status: best ? "verified" : "no_price",
     best: best && {
       channel: best.channel, room: best.room, board: best.board,

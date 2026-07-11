@@ -29,7 +29,7 @@ const MEAL = { lpd: "breakfast", dp: "half-board", pension: "full-board", ai: "a
 const BOOKING_FEE = 0.02; // 2% "frais de dossier" the site adds on top.
 
 function parseArgs(argv) {
-  const a = { adults: 2, children: [], hotelId: "354", ville: "Tabarka", rooms: 1 };
+  const a = { adults: 2, children: [], hotelId: "354", ville: "Tabarka", rooms: 1, boards: ["lpd", "dp"] };
   for (let i = 2; i < argv.length; i++) {
     const k = argv[i], v = argv[i + 1];
     if (k === "--checkin") (a.checkin = v), i++;
@@ -39,6 +39,7 @@ function parseArgs(argv) {
     else if (k === "--hotel-id") (a.hotelId = v), i++;
     else if (k === "--ville") (a.ville = v), i++;
     else if (k === "--rooms") (a.rooms = Number(v)), i++;
+    else if (k === "--boards") (a.boards = v.split(",").filter(Boolean)), i++;
   }
   if (!a.checkin || !a.checkout) {
     console.error("Required: --checkin YYYY-MM-DD --checkout YYYY-MM-DD");
@@ -71,9 +72,9 @@ function occupancyParams(a) {
   return p;
 }
 
-function buildUrl(a, n) {
+function buildUrl(a, n, formule = "") {
   const p = new URLSearchParams({
-    id_hotel_xml: a.hotelId, formule: "", integrateur: "", token: "",
+    id_hotel_xml: a.hotelId, formule, integrateur: "", token: "",
     session: "", type_chambre: "", testmodif: "0", ville: a.ville,
     chambres: String(a.rooms),
     DOPBookingSystem_CheckIn1: toFr(a.checkin), nbr_nuit: String(n),
@@ -166,14 +167,28 @@ async function main() {
   };
   if (!(n > 0)) fail(query, "checkout must be after checkin", "error");
   try {
-    const { status: http, text } = await smartGet(buildUrl(a, n), {
-      xhr: true, referer: `${HOST}/detail_hotel_${a.hotelId}/`,
-    });
-    if (http !== 200) fail(query, `HTTP ${http} from TunisieBooking`, classifyError(http));
-    const { status, note, offers } = analyze(text, a, n);
+    // One request per board (lpd=B&B, dp=half-board, …); merge the offers.
+    const results = await Promise.all(
+      a.boards.map(async (b) => {
+        const { status: http, text } = await smartGet(buildUrl(a, n, b), {
+          xhr: true, referer: `${HOST}/detail_hotel_${a.hotelId}/`,
+        });
+        if (http !== 200) return { status: classifyError(http), offers: [] };
+        return analyze(text, a, n);
+      })
+    );
+    const offers = results.flatMap((r) => r.offers).sort((x, y) => x.total - y.total);
+    const drift = results.some((r) => r.status === "drift");
+    const status = offers.length ? "verified" : drift ? "drift" : "no_price";
     emit({
       query, generatedAt: new Date().toISOString(),
-      status, source: "TunisieBooking (browserless)", note, offers,
+      status, source: "TunisieBooking (browserless)",
+      note: status === "drift"
+        ? "DRIFT: rooms rendered but no parseable price — TunisieBooking markup likely changed."
+        : status === "verified"
+        ? `Totals include ${BOOKING_FEE * 100}% booking fee. Boards: ${a.boards.join(", ")}.`
+        : "No priced room for these dates/occupancy.",
+      offers,
     });
     if (status === "drift") process.exit(3); // non-zero so callers/CI notice.
   } catch (e) {
