@@ -84,7 +84,7 @@ function buildUrl(a, n) {
 
 // Parse the hidden price_<meal>_<opt>_<room> inputs and the room labels the
 // radio buttons carry (value="meal@@opt@@Label@@..@@code@@offerId").
-function parseOffers(htmlText, a, n) {
+export function parseOffers(htmlText, a, n) {
   const rooms = new Map(); // opt -> {label}
   const roomRe =
     /value="(lpd|dp|pension|ai)@@(\d+)@@([^@]+?)@@[^"]*"/gi;
@@ -129,7 +129,34 @@ function parseOffers(htmlText, a, n) {
   return offers.sort((x, y) => x.total - y.total);
 }
 
-(async () => {
+// Canary: the endpoint said "sucess" and rendered room radios, yet we parsed no
+// price. That is almost always the site changing its markup — a DRIFT we must
+// shout about, not a silent "no_price" that would hide a broken parser.
+const SUCCESS_RE = /sucess###/i;
+const ROOM_ANY_RE = /value="(?:lpd|dp|pension|ai)@@\d+@@/i;
+export function classify(text, offers) {
+  if (/failure###/i.test(text.slice(0, 80))) return "no_price";
+  if (offers.length) return "verified";
+  if (SUCCESS_RE.test(text) && ROOM_ANY_RE.test(text)) return "drift";
+  return "no_price";
+}
+
+// Pure, testable core: HTML text -> normalized result. No network, no process.
+export function analyze(text, a, n) {
+  const offers = parseOffers(text, a, n);
+  const status = classify(text, offers);
+  const note =
+    status === "drift"
+      ? "DRIFT: TunisieBooking returned rooms but no parseable price_* field — markup likely changed. Do NOT trust a missing price as sold-out; update the parser."
+      : status === "verified"
+      ? `Totals include ${BOOKING_FEE * 100}% booking fee.`
+      : status === "no_price"
+      ? "No priced room for these dates/occupancy."
+      : "";
+  return { status, note, offers };
+}
+
+async function main() {
   const a = parseArgs(process.argv);
   const n = nights(a.checkin, a.checkout);
   const query = {
@@ -139,25 +166,24 @@ function parseOffers(htmlText, a, n) {
   };
   if (!(n > 0)) fail(query, "checkout must be after checkin", "error");
   try {
-    const { status, text } = await smartGet(buildUrl(a, n), {
+    const { status: http, text } = await smartGet(buildUrl(a, n), {
       xhr: true, referer: `${HOST}/detail_hotel_${a.hotelId}/`,
     });
-    if (status !== 200) fail(query, `HTTP ${status} from TunisieBooking`, classifyError(status));
-    const head = text.slice(0, 60).toLowerCase();
-    if (head.includes("failure")) {
-      const reason = text.split("###")[1] || "no availability";
-      fail(query, `TunisieBooking: ${reason.trim()}`, "no_price");
-    }
-    const offers = parseOffers(text, a, n);
+    if (http !== 200) fail(query, `HTTP ${http} from TunisieBooking`, classifyError(http));
+    const { status, note, offers } = analyze(text, a, n);
     emit({
       query, generatedAt: new Date().toISOString(),
-      status: offers.length ? "verified" : "no_price",
-      source: "TunisieBooking (browserless)",
-      note: offers.length ? `Totals include ${BOOKING_FEE * 100}% booking fee.` : "No priced room returned.",
-      offers,
+      status, source: "TunisieBooking (browserless)", note, offers,
     });
+    if (status === "drift") process.exit(3); // non-zero so callers/CI notice.
   } catch (e) {
     const msg = String(e?.message || e);
     fail(query, msg, classifyError(msg));
   }
-})();
+}
+
+// Only run when executed directly, so tests can import analyze()/parseOffers().
+import { pathToFileURL } from "node:url";
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main();
+}

@@ -23,9 +23,24 @@ import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { getRate } from "./lib/fx.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const AGREE_TOLERANCE = 0.03; // 3% -> two channels "agree" on the leader.
+
+// Two offers are "comparable" (safe to corroborate) only if they're the same
+// board and a similar room class — not just a coincidentally close price.
+const roomClass = (s = "") => {
+  const t = s.toLowerCase();
+  if (/suite|villa/.test(t)) return "suite";
+  if (/deluxe|delux|premium/.test(t)) return "deluxe";
+  if (/triple|famil|family/.test(t)) return "triple";
+  if (/double|twin|standard|classic|superior|sup/.test(t)) return "standard";
+  return "any";
+};
+const comparable = (a, b) =>
+  (a.board || "unknown") === (b.board || "unknown") &&
+  (roomClass(a.room) === roomClass(b.room) || roomClass(a.room) === "any" || roomClass(b.room) === "any");
 
 function parseArgs(argv) {
   const a = { adults: 2, children: [], nights: 2, eurRate: 3.37, hotel: "la-cigale-tabarka" };
@@ -91,6 +106,11 @@ const toEUR = (o, rate) => {
   let stays;
   try { stays = windows(a); } catch (e) { emit({ status: "error", note: String(e.message) }); process.exit(2); }
 
+  // Live EUR/TND unless the user pinned one; fall back honestly with a flag.
+  let fx = { rate: a.eurRate, stale: true, source: "cli --eur-rate" };
+  if (!process.argv.includes("--eur-rate")) fx = await getRate("EUR", "TND");
+  const rate = fx.rate || a.eurRate;
+
   const childArgs = (extra) => [
     "--adults", String(a.adults),
     ...(a.children.length ? ["--children", a.children.join(",")] : []),
@@ -126,7 +146,7 @@ const toEUR = (o, rate) => {
     const offers = results
       .filter((r) => r && r.status === "verified")
       .flatMap((r) => r.offers || [])
-      .map((o) => ({ ...o, eur: toEUR(o, a.eurRate), window: `${s.checkin}→${s.checkout}` }))
+      .map((o) => ({ ...o, eur: toEUR(o, rate), window: `${s.checkin}→${s.checkout}` }))
       .filter((o) => o.eur != null)
       .sort((x, y) => x.eur - y.eur);
     return { window: `${s.checkin}→${s.checkout}`, offers };
@@ -142,6 +162,7 @@ const toEUR = (o, rate) => {
   if (best) {
     corroborated = all.some(
       (o) => o.channel !== best.channel &&
+        comparable(o, best) &&
         Math.abs(o.eur - best.eur) / best.eur <= AGREE_TOLERANCE
     );
   }
@@ -159,9 +180,10 @@ const toEUR = (o, rate) => {
       hotel: ids.displayName || a.hotel,
       window: a.window || `${a.checkin}→${a.checkout}`,
       nights: a.nights, adults: a.adults, childrenAges: a.children,
-      eurRate: a.eurRate, childPolicy: ids.childPolicy || null,
+      childPolicy: ids.childPolicy || null,
     },
     generatedAt: new Date().toISOString(),
+    fx: { pair: "EUR/TND", rate, stale: fx.stale, source: fx.source },
     tiersRun: [...tiersRun],
     shortCircuited: corroborated,
     status: best ? "verified" : "no_price",

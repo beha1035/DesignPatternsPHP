@@ -36,21 +36,10 @@ export function classifyError(msg) {
     : "error";
 }
 
-/**
- * GET a URL with browser-like headers.
- * @param {string} url
- * @param {object} [opts]
- * @param {object} [opts.headers]  extra/override headers
- * @param {number} [opts.timeoutMs=20000]
- * @param {boolean} [opts.xhr=false]  send X-Requested-With (for AJAX endpoints)
- * @param {string} [opts.referer]
- * @returns {Promise<{status:number, ok:boolean, text:string}>}
- */
-export async function smartGet(url, opts = {}) {
-  const { headers = {}, timeoutMs = 20000, xhr = false, referer } = opts;
-  const h = { ...BROWSER_HEADERS, ...headers };
-  if (xhr) h["X-Requested-With"] = "XMLHttpRequest";
-  if (referer) h.Referer = referer;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// One attempt, no retry.
+async function once(url, h, timeoutMs) {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), timeoutMs);
   try {
@@ -60,4 +49,42 @@ export async function smartGet(url, opts = {}) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * GET a URL with browser-like headers, retrying transient failures with fixed
+ * backoff. Retries on network errors and 5xx/429; a 403/407 (policy denial) is
+ * returned immediately — retrying an egress block is pointless and dishonest.
+ * @param {string} url
+ * @param {object} [opts]
+ * @param {object} [opts.headers]  extra/override headers
+ * @param {number} [opts.timeoutMs=20000]
+ * @param {boolean} [opts.xhr=false]  send X-Requested-With (for AJAX endpoints)
+ * @param {string} [opts.referer]
+ * @param {number} [opts.retries=2]  extra attempts after the first
+ * @param {number[]} [opts.backoffMs=[500,1500]]  waits between attempts
+ * @returns {Promise<{status:number, ok:boolean, text:string}>}
+ */
+export async function smartGet(url, opts = {}) {
+  const { headers = {}, timeoutMs = 20000, xhr = false, referer,
+    retries = 2, backoffMs = [500, 1500] } = opts;
+  const h = { ...BROWSER_HEADERS, ...headers };
+  if (xhr) h["X-Requested-With"] = "XMLHttpRequest";
+  if (referer) h.Referer = referer;
+  let lastErr;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await once(url, h, timeoutMs);
+      // Don't retry policy denials or normal responses; only 5xx/429 are transient.
+      if (res.status === 429 || res.status >= 500) {
+        if (attempt < retries) { await sleep(backoffMs[attempt] ?? 1500); continue; }
+      }
+      return res;
+    } catch (e) {
+      lastErr = e;
+      if (attempt < retries) { await sleep(backoffMs[attempt] ?? 1500); continue; }
+      throw e;
+    }
+  }
+  throw lastErr;
 }
