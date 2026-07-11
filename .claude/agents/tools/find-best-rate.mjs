@@ -55,6 +55,8 @@ function parseArgs(argv) {
     else if (k === "--children") (a.children = v.split(",").filter(Boolean).map(Number)), i++;
     else if (k === "--eur-rate") (a.eurRate = Number(v)), i++;
     else if (k === "--escalate") a.escalate = true;
+    else if (k === "--name") (a.name = v), i++;   // for on-the-fly discovery
+    else if (k === "--city") (a.city = v), i++;
   }
   return a;
 }
@@ -98,8 +100,17 @@ const toEUR = (o, rate) => {
 
 (async () => {
   const a = parseArgs(process.argv);
+  const cachePath = join(HERE, "cache", "hotel-ids.json");
   let cache = {};
-  try { cache = JSON.parse(await readFile(join(HERE, "cache", "hotel-ids.json"), "utf8")); } catch {}
+  try { cache = JSON.parse(await readFile(cachePath, "utf8")); } catch {}
+  // Generic discovery: if the hotel isn't cached but a --name/--city was given,
+  // resolve and persist its channel IDs first, then continue.
+  const discovered = [];
+  if (!cache[a.hotel] && a.name && a.city) {
+    await run("discover-hotel.mjs", ["--name", a.name, "--city", a.city, "--slug", a.hotel, "--write"]);
+    try { cache = JSON.parse(await readFile(cachePath, "utf8")); } catch {}
+    if (cache[a.hotel]) discovered.push(`discovered:${a.hotel}`);
+  }
   const ids = cache[a.hotel] || {};
   const tb = ids.tunisiebooking || {};
   const gh = ids.googleHotels || {};
@@ -213,7 +224,7 @@ const toEUR = (o, rate) => {
     },
     generatedAt: new Date().toISOString(),
     fx: { pair: "EUR/TND", rate, stale: fx.stale, source: fx.source },
-    tiersRun: [...tiersRun, ...escalationRan],
+    tiersRun: [...discovered, ...tiersRun, ...escalationRan],
     shortCircuited: corroborated,
     escalationRan,
     status: best ? "verified" : "no_price",

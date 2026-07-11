@@ -1,5 +1,5 @@
 {
-  "_comment": "Discovery cache: per-hotel channel identifiers so repeat runs skip the search step (Tier: cache). Keyed by a stable slug.",
+  "_comment": "Discovery cache: per-hotel channel identifiers so repeat runs skip the search step. Keyed by a stable slug. Seed entries are curated; discover-hotel.mjs --write adds new ones (name+city -> TunisieBooking id + Google query).",
   "la-cigale-tabarka": {
     "displayName": "La Cigale Tabarka Hôtel Thalasso, Spa & Golf",
     "city": "Tabarka",

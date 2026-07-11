@@ -80,7 +80,19 @@ node .claude/agents/tools/find-best-rate.mjs \
   --hotel la-cigale-tabarka --window 2026-07-14..2026-07-20 --nights 2 \
   --adults 2 --children 10 [--escalate]
 # Taux EUR/TND live par défaut (open.er-api.com) ; --eur-rate le fige.
+
+# Hôtel PAS encore en cache ? Ajoute --name/--city : l'orchestrateur découvre et
+# met en cache ses IDs par canal, puis tarifie. Marche pour n'importe quel hôtel.
+node .claude/agents/tools/find-best-rate.mjs \
+  --hotel dar-ismail-tabarka --name "Dar Ismail" --city Tabarka \
+  --window 2026-07-14..2026-07-18 --nights 2 --adults 2 --children 10
 ```
+
+**Découverte générique — `discover-hotel.mjs`** : résout depuis un nom + une
+ville le `hotelId` TunisieBooking (parsé sur la page-liste de la ville, match sur
+les mots **distinctifs** en ignorant le nom de ville partagé) et la requête
+Google Hotels, puis écrit dans le cache. Booking/Trip restent `null` (best-effort,
+jamais deviné pour ne pas interroger le mauvais hôtel).
 
 - **`--escalate`** : au lieu de seulement *conseiller* l'escalade, l'orchestrateur
   **lance vraiment** le navigateur (`validate-rate`, Tier 3) quand le leader reste
