@@ -76,15 +76,24 @@ function extractPairs(htmlText) {
 // Match on DISTINCTIVE words only: the city name appears in every hotel on a
 // city page, so counting it would tie the wrong hotel (e.g. "La Cigale Tabarka"
 // vs "Residence Mehari Tabarka"). Strip city tokens from the wanted set.
+// Generic hospitality/article words that must NOT serve as the match anchor —
+// otherwise "The Residence" matches "The Penthouse" on "the", or "Dar El Jeld"
+// matches "Ezzahra Dar" on "dar". The anchor must be a real brand/name token.
+const STOP = new Set([
+  "the", "dar", "res", "hotel", "hotels", "resort", "spa", "thalasso", "thalassa",
+  "palace", "royal", "grand", "beach", "club", "prestige", "selection", "blu",
+  "plaza", "suites", "bay", "and", "les", "des", "sur", "mer", "golf", "aqua",
+]);
+
 function bestMatch(pairs, name, city = "") {
   const cityWords = new Set(sig(city));
   const distinct = sig(name).filter((w) => !cityWords.has(w));
   const want = new Set(distinct.length ? distinct : sig(name));
-  // Anchor = the query's first distinctive word (brand/name), e.g. "riu",
-  // "cigale", "marhaba". The matched hotel MUST contain it — otherwise a shared
-  // generic word ("palace", "beach") would confidently resolve the WRONG hotel
-  // (Riu Palace -> Radisson Blu Palace). Better to return null (unresolved).
-  const anchor = distinct[0] || [...want][0] || null;
+  // Anchor = the query's first DISTINCTIVE, non-generic word (brand/name), e.g.
+  // "riu", "cigale", "marhaba", "residence". The matched hotel MUST contain it —
+  // otherwise a shared generic word resolves the WRONG hotel. If every word is
+  // generic, fall back to the first so we still gate on something.
+  const anchor = distinct.find((w) => !STOP.has(w)) || distinct[0] || [...want][0] || null;
   let best = null, bestScore = 0;
   for (const [id, nm] of pairs) {
     if (!nm) continue;

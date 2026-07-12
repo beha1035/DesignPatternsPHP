@@ -40,6 +40,17 @@ test("bestMatch refuses a generic-word false positive (anchor gate)", () => {
   assert.equal(bestMatch(pairs, "Riu Palace", "Djerba"), null);
 });
 
+test("bestMatch skips stopword anchors (The/Dar) — no luxury mismatch", () => {
+  const pairs = new Map([
+    ["403", "The Penthouse Suites Hotel"],
+    ["999", "Ezzahra Dar Tunis"],
+  ]);
+  // "The Residence" anchors on "residence" (not "the") -> no match here.
+  assert.equal(bestMatch(pairs, "The Residence Tunis", "Tunis"), null);
+  // "Dar El Jeld" anchors on "jeld" (not "dar") -> no match here.
+  assert.equal(bestMatch(pairs, "Dar El Jeld", "Tunis"), null);
+});
+
 test("slug/citySlug normalize accents and spaces", () => {
   assert.equal(slugify("La Cigale Tabarka"), "la-cigale-tabarka");
   assert.equal(citySlug("Hammamet"), "hammamet");
