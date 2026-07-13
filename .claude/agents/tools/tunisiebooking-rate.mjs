@@ -111,7 +111,9 @@ export function parseOffers(htmlText, a, n) {
     if (!perRoom.length) continue;
     const base = perRoom.reduce((s, r) => s + r.price, 0);
     const total = Math.round(base * (1 + BOOKING_FEE));
-    const cheapestOpt = totals[meal][String(a.rooms >= 1 ? 1 : 1)]?.opt;
+    // Label from room 1's cheapest option (rooms default to 1; for multi-room
+    // this is the first room's type — the total above still sums all rooms).
+    const cheapestOpt = totals[meal]["1"]?.opt;
     offers.push({
       channel: "TunisieBooking",
       hotel: `hotel_${a.hotelId}`,

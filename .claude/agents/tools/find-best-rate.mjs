@@ -6,7 +6,7 @@
 //   Tier 0  structured APIs   google-hotels-rate.mjs  (+ apify-hotel-rates.mjs if APIFY_TOKEN)
 //   Tier 1  browserless HTTP  tunisiebooking-rate.mjs (proven ~2s, free)
 //   Tier 2  managed unblocker brightdata-unlock.mjs   (only for gaps; needs key)
-//   Tier 3  self-hosted browser validate-rate.mjs     (offline last resort — not spawned here)
+//   Tier 3  self-hosted browser browser-rate.mjs      (occupancy-pinned Booking, via --escalate)
 //
 // It sweeps every N-night window in a flexible date range in parallel, normalizes
 // to EUR, ranks comparable offers, and SHORT-CIRCUITS: once two independent
@@ -82,11 +82,11 @@ function windows(a) {
   return out;
 }
 
-function run(script, args) {
+function run(script, args, timeoutMs = 45000) {
   return new Promise((resolve) => {
     execFile(
       process.execPath, [join(HERE, script), ...args],
-      { env: process.env, maxBuffer: 8 * 1024 * 1024, timeout: 45000 },
+      { env: process.env, maxBuffer: 8 * 1024 * 1024, timeout: timeoutMs },
       (err, stdout) => {
         try { resolve(JSON.parse(stdout)); }
         catch { resolve({ status: "error", offers: [], note: `bad output from ${script}${err ? ": " + err.message : ""}` }); }
@@ -95,10 +95,23 @@ function run(script, args) {
   });
 }
 
+// Concurrency-limited map. TunisieBooking throttles bulk parallel requests and
+// then returns false "no availability", so we cap how many date-windows are
+// priced at once instead of firing Promise.all over every window.
+async function mapLimit(items, limit, fn) {
+  const out = new Array(items.length);
+  let i = 0;
+  const worker = async () => {
+    while (i < items.length) { const idx = i++; out[idx] = await fn(items[idx], idx); }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
+}
+
 const toEUR = (o, rate) => {
   if (o.currency === "EUR" || o.totalEUR != null) return o.totalEUR ?? o.total;
   if (o.currency === "TND") return Math.round((o.total / rate) * 100) / 100;
-  return o.total; // assume already comparable
+  return null; // unknown currency: drop it rather than mis-rank a non-EUR total as EUR
 };
 
 (async () => {
@@ -148,7 +161,8 @@ const toEUR = (o, rate) => {
   ];
 
   const tiersRun = new Set();
-  const perStay = await Promise.all(stays.map(async (s) => {
+  // Cap concurrency to avoid TunisieBooking throttling (false "no availability").
+  const perStay = await mapLimit(stays, 2, async (s) => {
     const jobs = [];
     // Tier 1 — free browserless, the workhorse for this hotel.
     if (tb.hotelId) {
@@ -180,7 +194,7 @@ const toEUR = (o, rate) => {
           `&checkout=${s.checkout}&group_adults=${a.adults}&group_children=${a.children.length}` +
           `${ages}&selected_currency=EUR`);
       }
-      jobs.push(run("apify-hotel-rates.mjs", childArgs(apifyArgs)));
+      jobs.push(run("apify-hotel-rates.mjs", childArgs(apifyArgs), 300000)); // Apify run-sync is slow
     }
     const results = await Promise.all(jobs);
     const offers = results
@@ -190,7 +204,7 @@ const toEUR = (o, rate) => {
       .filter((o) => o.eur != null)
       .sort((x, y) => x.eur - y.eur);
     return { window: `${s.checkin}→${s.checkout}`, offers };
-  }));
+  });
 
   // Global ranking across all windows. Offers whose occupancy could NOT be
   // verified as our exact party (e.g. Apify's headline hotel price) are kept as
@@ -212,31 +226,34 @@ const toEUR = (o, rate) => {
   let { best, corroborated } = evaluate(all);
 
   // Auto-escalation (opt-in --escalate): when the leader is single-sourced, RUN
-  // the browser (Tier 3) to CONFIRM it — not to invent a cheaper one. validate-
-  // rate returns raw, room-UNLABELLED prices scraped off the page; picking their
-  // min would fabricate a "best" from a non-comparable room (e.g. a 2-pax rate).
-  // So we only use them as corroboration: does any observed price on ANOTHER
-  // channel land within tolerance of our leader? That confirms without lying.
-  const eurNum = (s) => {
-    const m = String(s).match(/[\d][\d.,]*/);
-    return m ? Number(m[0].replace(/\s/g, "").replace(/,/g, "")) : null;
-  };
+  // the browser (Tier 3) to CONFIRM it — not to invent a cheaper one. We use
+  // browser-rate.mjs with THIS hotel's own Booking slug (never La Cigale's
+  // hardcoded deep links), so the observed prices belong to the right property.
+  // The prices are room-unlabelled signal, so they only corroborate: does any
+  // observed Booking price land within tolerance of our leader? That confirms
+  // without lying, and never lowers the ranked best.
   const escalationRan = [];
   let browserObserved = [];
   let corroboratedBy = null;
   if (a.escalate && best && !corroborated) {
-    const [ci, co] = best.window.split("→");
-    escalationRan.push("tier3:validate-rate");
-    const vr = await run("validate-rate.mjs", childArgs(["--checkin", ci, "--checkout", co, "--currency", "EUR"]));
-    browserObserved = (vr?.results || [])
-      .filter((r) => r.status === "verified" && Array.isArray(r.prices))
-      .flatMap((r) => r.prices.map((p) => ({ channel: r.channel, url: r.url, eur: eurNum(p) })))
-      .filter((o) => o.eur > 0);
-    const match = browserObserved.find(
-      (o) => o.channel !== best.channel &&
-        Math.abs(o.eur - best.eur) / best.eur <= AGREE_TOLERANCE
-    );
-    if (match) { corroborated = true; corroboratedBy = match; }
+    if (ids.booking?.slug) {
+      const [ci, co] = best.window.split("→");
+      escalationRan.push("tier3:browser-rate");
+      const br = await run("browser-rate.mjs",
+        childArgs(["--booking-slug", ids.booking.slug, "--checkin", ci, "--checkout", co, "--currency", "EUR"]),
+        150000); // browser is slow; give it room, unlike the default 45s
+      browserObserved = (br?.offers || [])
+        .flatMap((o) => [o.total, ...(o.candidates || [])])
+        .filter((x) => typeof x === "number" && x > 0)
+        .map((eur) => ({ channel: "Booking.com (browser)", eur }));
+      const match = browserObserved.find(
+        (o) => o.channel !== best.channel &&
+          Math.abs(o.eur - best.eur) / best.eur <= AGREE_TOLERANCE
+      );
+      if (match) { corroborated = true; corroboratedBy = match; }
+    } else {
+      escalationRan.push("tier3:skipped-no-booking-url");
+    }
   }
 
   const distinctChannels = new Set(all.map((o) => o.channel));
@@ -244,7 +261,7 @@ const toEUR = (o, rate) => {
   if (!best) {
     escalation.push(a.escalate
       ? "No verified rate even after Tier 3 escalation. The hotel may be unavailable for these dates on every reachable channel."
-      : "No verified rate from Tier 0/1. Re-run with --escalate to auto-run the browser (validate-rate.mjs), or fetch a channel via brightdata-unlock.mjs.");
+      : "No verified rate from Tier 0/1. Re-run with --escalate to auto-run the browser (browser-rate.mjs, needs a cached Booking slug), or fetch a channel via brightdata-unlock.mjs.");
   } else if (!corroborated) {
     escalation.push(a.escalate
       ? `Leader ${best.channel} @ €${best.eur} stayed single-sourced after escalation — trust it as the best FOUND price, but no second channel confirmed it.`
