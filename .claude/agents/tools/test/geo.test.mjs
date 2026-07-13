@@ -35,6 +35,17 @@ test("uppercases the ISO country code", () => {
   assert.equal(b.city, "Djerba");
 });
 
+test("prefers the city over an administrative area of the same name", () => {
+  const rows = [
+    { display_name: "Pachalik de Marrakech, Morocco", addresstype: "administrative", importance: 0.62,
+      address: { county: "Pachalik de Marrakech", country: "Morocco", country_code: "ma" } },
+    { display_name: "Marrakesh, Morocco", addresstype: "city", importance: 0.60,
+      address: { city: "Marrakesh", country: "Morocco", country_code: "ma" } },
+  ];
+  const b = pickBestPlace(rows, null, "Marrakech"); // note spelling variant
+  assert.equal(b.city, "Marrakesh"); // the city, not the pachalik
+});
+
 test("name gate beats importance: 'Cancun' is not fuzzy-matched to 'Changchun'", () => {
   const rows = [
     { display_name: "Changchun City, Jilin, China", addresstype: "city", importance: 0.615,

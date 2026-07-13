@@ -5,8 +5,19 @@
 
 if (!process.env.NODE_USE_ENV_PROXY) process.env.NODE_USE_ENV_PROXY = "1";
 
-// Pinned fallbacks (update occasionally); only used when the live fetch fails.
+// Pinned EUR->X fallbacks (update occasionally); only used when the live fetch
+// fails. Cross rates for any pair among these currencies are derived from them.
 const PINNED = { TND: 3.37, USD: 1.08, GBP: 0.84, MAD: 10.8 };
+
+// Derive a base->quote rate from the EUR-anchored PINNED table (both directions
+// and cross pairs), so the fallback works for more than just an EUR base.
+function pinnedRate(base, quote) {
+  if (base === quote) return 1;
+  if (base === "EUR") return PINNED[quote] ?? null;
+  if (quote === "EUR") return PINNED[base] ? 1 / PINNED[base] : null;
+  if (PINNED[base] && PINNED[quote]) return PINNED[quote] / PINNED[base];
+  return null;
+}
 
 /**
  * @param {string} base  e.g. "EUR"
@@ -24,8 +35,7 @@ export async function getRate(base = "EUR", quote = "TND", { timeoutMs = 6000 } 
     if (typeof rate !== "number") throw new Error(`no ${quote} rate in response`);
     return { rate, stale: false, asOf: j.time_last_update_utc || new Date().toISOString(), source: "open.er-api.com" };
   } catch {
-    const rate = base === "EUR" ? PINNED[quote] : null;
-    return { rate, stale: true, asOf: null, source: "pinned-fallback" };
+    return { rate: pinnedRate(base, quote), stale: true, asOf: null, source: "pinned-fallback" };
   } finally {
     clearTimeout(timer);
   }

@@ -44,7 +44,7 @@ const EXECUTABLE = "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
 
 // ---- args -----------------------------------------------------------------
 function parseArgs(argv) {
-  const a = { adults: 2, children: [], currency: "EUR", timeout: 45000, headful: false };
+  const a = { adults: 2, children: [], currency: "EUR", timeout: 45000, headful: false, hotelName: "La Cigale Tabarka" };
   for (let i = 2; i < argv.length; i++) {
     const k = argv[i];
     const v = argv[i + 1];
@@ -54,6 +54,7 @@ function parseArgs(argv) {
     else if (k === "--children") (a.children = v.split(",").filter(Boolean).map(Number)), i++;
     else if (k === "--currency") (a.currency = v), i++;
     else if (k === "--channel") (a.channel = v), i++;
+    else if (k === "--hotel-name") (a.hotelName = v), i++;
     else if (k === "--timeout") (a.timeout = Number(v)), i++;
     else if (k === "--headful") a.headful = true;
   }
@@ -203,7 +204,7 @@ async function validateChannel(context, link, args) {
 
   const output = {
     query: {
-      hotel: "La Cigale Tabarka",
+      hotel: args.hotelName,
       checkin: args.checkin,
       checkout: args.checkout,
       adults: args.adults,

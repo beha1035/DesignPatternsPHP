@@ -27,7 +27,18 @@ function nameMatch(row, queryName) {
   if (!n || !q) return 0;
   if (n === q) return 2;
   if (n.startsWith(q) || q.startsWith(n) || n.includes(q)) return 1;
+  // Spelling tolerance: "marrakech" (query) vs "marrakesh" (OSM) share a prefix.
+  if (q.length >= 5 && n.length >= 5 && n.slice(0, 5) === q.slice(0, 5)) return 1;
   return 0;
+}
+
+// Prefer an actual settlement (or island) over an administrative boundary of the
+// same name — so "Marrakech" resolves to the city, not "Pachalik de Marrakech".
+// All settlement types rank equally so importance still decides between them
+// (e.g. the famous Djerba island over a tiny like-named village).
+const SETTLEMENT_TYPES = new Set(["city", "town", "village", "municipality", "island"]);
+function cityRank(row) {
+  return SETTLEMENT_TYPES.has(row.addresstype || row.type) ? 1 : 0;
 }
 
 // Pure: choose the best place from Nominatim rows. Rank by (name-match desc,
@@ -47,6 +58,7 @@ export function pickBestPlace(rows, countryHint = null, queryName = null) {
   if (named.length) cand = named;
   cand.sort((a, b) =>
     nameMatch(b, queryName) - nameMatch(a, queryName) ||
+    cityRank(b) - cityRank(a) ||
     Number(b.importance || 0) - Number(a.importance || 0)
   );
   const top = cand[0];
