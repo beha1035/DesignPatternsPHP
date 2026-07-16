@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import "./lib/net-guard.mjs"; // SSRF guard — installs in THIS process (incl. execFile children)
 // discover-hotel — resolve a hotel's per-channel identifiers from just its name +
 // city, then cache them so the agent works for ANY hotel, not only hand-seeded
 // ones. Focuses on the two PROVEN tiers:

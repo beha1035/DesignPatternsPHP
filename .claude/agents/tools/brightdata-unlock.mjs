@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import "./lib/net-guard.mjs"; // SSRF guard — installs in THIS process (incl. execFile children)
 // brightdata-unlock — Tier 2 of the rate cascade: a MANAGED anti-bot unblocker
 // that replaces our self-hosted Playwright for the sites that genuinely fight
 // back (Agoda's date-SPA, Hotels.com's lazy price micro-service, Expedia's 429).

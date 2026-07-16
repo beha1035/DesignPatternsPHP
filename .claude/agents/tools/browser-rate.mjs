@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import "./lib/net-guard.mjs"; // SSRF guard — installs in THIS process (incl. execFile children)
+import { assertSafeUrl } from "./lib/net-guard.mjs";
 // browser-rate — country-agnostic, occupancy-EXACT Booking.com pricer. Drives a
 // real browser to any hotel's Booking page with the exact party (adults + child
 // ages in the URL), then reads the price from the ROOMS TABLE — the price Booking
@@ -107,6 +109,11 @@ async function main() {
 
   const a = parseArgs(process.argv);
   const url = bookingUrl(a);
+  // Playwright's page.goto does NOT go through the guarded globalThis.fetch, so
+  // guard the target explicitly here — this is the one place a free --booking-url
+  // could otherwise reach the network unchecked (SSRF).
+  try { assertSafeUrl(url); }
+  catch (e) { emit({ status: "blocked", url, note: String(e.message), offers: [] }); process.exit(0); }
   const query = { hotel: a.slug || a.url, checkin: a.checkin, checkout: a.checkout, adults: a.adults, childrenAges: a.children, currency: a.currency };
   const REPORTS = join(dirname(fileURLToPath(import.meta.url)), "..", "reports");
   mkdirSync(REPORTS, { recursive: true });

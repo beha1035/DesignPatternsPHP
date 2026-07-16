@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import "./lib/net-guard.mjs"; // SSRF guard — installs in THIS process (incl. execFile children)
 // apify-hotel-rates — Tier 0 breadth: one call to an Apify hotel-price actor that
 // compares many OTAs (Booking, Expedia, Agoda, direct sites…) for exact dates +
 // occupancy, server-side, returning clean structured rows. Apify runs the browser
@@ -109,13 +110,15 @@ function normalize(rows, a) {
     currency: a.currency, maxItems: 10,
     ...(a.startUrl ? { startUrls: [{ url: a.startUrl }] } : { search: a.query }),
   };
+  // Token in the Authorization header, NOT the query string — a query-string
+  // token can leak into error messages/logs (defense in depth, like brightdata).
   const url =
     `https://api.apify.com/v2/acts/${encodeURIComponent(a.actor)}` +
-    `/run-sync-get-dataset-items?token=${a.apiKey}`;
+    `/run-sync-get-dataset-items`;
   try {
     const resp = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${a.apiKey}` },
       body: JSON.stringify(input),
     });
     const text = await resp.text();

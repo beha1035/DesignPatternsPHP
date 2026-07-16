@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import "./lib/net-guard.mjs"; // SSRF guard — installs in THIS process (incl. execFile children)
 // tunisiebooking-rate — verified dated hotel prices from TunisieBooking WITHOUT a
 // browser. TunisieBooking is a top channel for Tunisian resorts (it carried the
 // cheapest verified rate for La Cigale Tabarka) yet is invisible to Google

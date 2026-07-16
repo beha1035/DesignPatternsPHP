@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import "./lib/net-guard.mjs"; // SSRF guard — installs in THIS process (incl. execFile children)
 // google-hotels-rate — verified dated hotel prices via SerpApi's Google Hotels
 // engine. This is the PREFERRED validation path (Amadeus Self-Service is being
 // decommissioned 2026-07-17). Google Hotels aggregates OTA + direct rates for

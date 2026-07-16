@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import "./lib/net-guard.mjs"; // SSRF guard — installs in THIS process (incl. execFile children)
 // find-best-rate — the cascade orchestrator. Runs the rate tiers cheapest-first
 // and only escalates when needed, so the browser (or a paid unblocker) is the
 // LAST resort, not the default:

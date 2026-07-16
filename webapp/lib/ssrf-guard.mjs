@@ -1,11 +1,17 @@
-// ssrf-guard — the CENTRAL anti-SSRF control point for every outbound request
-// the webapp makes. Nothing in this codebase is allowed to call the network
-// fetch layer directly in production: `server.mjs` installs this guard over
-// `globalThis.fetch` before any route/service/tool module is imported, so the
-// existing tool modules (lib/smart-fetch.mjs, lib/fx.mjs, lib/geo.mjs,
-// apify-hotel-rates.mjs) — which all call the bare global `fetch` — are
-// automatically routed through the same allowlist + private-IP check without
-// having to be modified (contract modules are reused, not reimplemented).
+// ssrf-guard — the anti-SSRF control point for outbound requests made IN THE
+// SERVER PROCESS (/api/search, /api/hotels/{id}/price). `server.mjs` installs
+// this guard over `globalThis.fetch`, so in-process tool calls (lib/smart-fetch,
+// lib/fx, lib/geo) route through the same allowlist + private-IP + DNS-rebind
+// check.
+//
+// IMPORTANT: a globalThis.fetch patch does NOT cross an execFile boundary. The
+// /api/rank path shells out to find-best-rate.mjs, which spawns the channel
+// tools — separate processes with their own globalThis. Those are guarded
+// independently by `.claude/agents/tools/lib/net-guard.mjs`, which every CLI
+// entry script imports for side effect (and which browser-rate also calls
+// explicitly before page.goto, since Playwright bypasses fetch). Keep the two
+// allowlists in sync. Together they make the "every outbound request is
+// guarded" claim actually true across all processes.
 //
 // Two independent controls, both required to pass:
 //   1. Host allowlist (`x-outbound-allowlist` in openapi.yaml) — exact
