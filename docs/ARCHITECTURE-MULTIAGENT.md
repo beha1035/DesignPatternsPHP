@@ -140,7 +140,53 @@ flowchart LR
 | CGU (usage perso) | Rester interne, pas de redistribution publique |
 | Secrets | En env, jamais commit (déjà vérifié) |
 
-## 7. Plan d'exécution multi-agents (proposé)
+## 7. Sécurité — modèle de menace & contrôles
+
+> Une webapp qui construit des URLs et fait des requêtes **côté serveur à partir
+> d'entrées utilisateur** est un classique de la **SSRF**. C'est le risque n°1
+> ici, avant tout le reste. Propriétaire : agent **Sécurité & Conformité**,
+> appliqué par Backend + DevOps.
+
+### Périmètre & actifs à protéger
+Clés API (SerpApi, Apify, Bright Data), l'IP sortante du serveur (réputation /
+bannissement), le cache, le navigateur (Chromium), le poste de l'utilisateur.
+
+### Frontières de confiance
+`client ↔ backend` et `backend ↔ sites externes` (TunisieBooking, Nominatim,
+SerpApi, Apify, Booking).
+
+### Top risques (attaque → contrôle → phase)
+
+| # | Menace | Impact | Contrôle | Gate |
+|---|---|---|---|---|
+| **1** | **SSRF** : `hotel-id`/`slug`/`url` utilisateur → `fetch` serveur ; un attaquant vise `169.254.169.254` (métadonnées cloud), IP privées, ou un hôte interne | 🔴 Critique | **Allowlist d'hôtes sortants** (seulement `tn.tunisiebooking.com`, `serpapi.com`, `open.er-api.com`, `nominatim…`, `booking.com`) ; **valider le format** (`hotel-id` numérique, `slug` regex stricte) ; **bannir IP privées/loopback/link-local** ; **ne PAS exposer `--booking-url`/`--start-url` libres** dans la surface web | P2 |
+| **2** | **Fuite de secret** : clé dans logs, message d'erreur, réponse, ou commit | 🔴 Critique | Secrets en **env only**, `.env` gitignored, **redaction** dans les logs, **secret-scanning en CI** ; **roter le token Apify** collé en chat | P2/P4 |
+| **3** | **XSS stocké** via contenu scrapé : noms d'hôtel/chambre issus du HTML rendus dans l'UI | 🟠 Élevé | **Échapper à l'affichage** (React auto-échappe ; jamais de `innerHTML` brut) ; **CSP** stricte ; sanitize | P3 |
+| **4** | **Bannissement / DoS auto-infligé** : rafales → l'IP serveur bannie par TunisieBooking | 🟠 Élevé | **Cache TTL**, **rate-limit par client**, **throttle sortant global**, **circuit-breaker**, timeouts par tier (déjà en place) | P4 |
+| **5** | **Injection de commande** via `execFile`/args | 🟡 Moyen | `execFile` **tableau d'args, jamais de shell** (déjà le cas) ; valider chaque arg ; pas d'interpolation shell | P2 |
+| **6** | **Accès non authentifié** à l'API (même en interne) | 🟠 Élevé | **Auth** (token/basic) ; **bind localhost/VPN** ; ne pas exposer publiquement ; CORS verrouillé | P5 |
+| **7** | **Vuln dépendances / supply chain** (npm + Playwright) | 🟡 Moyen | `npm audit` en CI, **lockfile**, pinning, deps minimales, Dependabot | P4 |
+| **8** | **Évasion sandbox Chromium** (`--no-sandbox`) | 🟡 Moyen | Exécuter **en conteneur isolé**, limites de ressources, **ne jamais ouvrir d'URL utilisateur arbitraire** (lié à #1) | P4 |
+| **9** | **En-têtes / transport** faibles | 🟡 Moyen | **TLS**, **helmet** (CSP, HSTS, X-Frame-Options…), cookies `HttpOnly`/`Secure` | P4 |
+
+### En-têtes & durcissement (minimum)
+`Content-Security-Policy`, `Strict-Transport-Security`, `X-Content-Type-Options:
+nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, CORS restreint
+à l'origine de l'UI.
+
+### Données personnelles
+Aujourd'hui : **aucune PII** (uniquement des prix d'hôtels) → périmètre RGPD
+faible. ⚠️ Si un jour on ajoute la **réservation** (identité, paiement) → nouveau
+périmètre lourd (RGPD + **PCI-DSS**) : à traiter comme un projet séparé, ne pas
+mélanger.
+
+### Porte de validation sécurité (P4)
+Checklist bloquante : 0 secret au dépôt (scan), allowlist SSRF testée (payloads
+`169.254.169.254`, `localhost`, `file://` rejetés), `npm audit` sans vuln
+critique, en-têtes présents, auth active, rate-limit prouvé. L'agent **Reviewer
+adversarial** tente activement une SSRF et une injection avant le go.
+
+## 8. Plan d'exécution multi-agents (proposé)
 
 1. **Bootstrap** : créer les définitions d'agents (`.claude/agents/*.md`) par rôle.
 2. **Workflow P0→P1** : Architecte produit OpenAPI + ADRs → gate revue.
