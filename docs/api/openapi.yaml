@@ -1,0 +1,754 @@
+openapi: 3.1.0
+
+info:
+  title: hotel-deal-finder API
+  version: 1.0.0
+  summary: API interne qui expose l'agent hotel-deal-finder (modules Node .mjs).
+  description: |
+    API HTTP **interne / usage perso** qui enveloppe les modules de tarification
+    d'hôtels (`find-best-rate`, `tunisiebooking-rate`, `discover-hotel`, `geo`,
+    `fx`, `country-router`). Elle recherche des hôtels, résout leurs identifiants
+    par canal et classe des offres vérifiées au meilleur prix, en TND/EUR.
+
+    ## Honnêteté du résultat (héritée de l'agent)
+    Chaque offre porte un `status` qui n'est JAMAIS confondu :
+    - `verified` — prix daté, réellement observé pour l'occupation demandée.
+    - `signal` — prix observé mais occupation/room non garantis (à corroborer).
+    - `no_price` — pas de tarif disponible pour ces dates/occupants.
+    Voir aussi `blocked` (canal anti-bot) et `drift` (markup du site changé).
+
+    ## Sécurité — anti-SSRF (contrat, pas seulement implémentation)
+    La surface d'API **n'accepte AUCUNE URL arbitraire** en entrée. Il n'existe
+    pas de champ `booking-url` / `start-url` / `url` exposé au client. Les seules
+    façons de désigner un hôtel sont :
+    - `hotelId` : **entier** (`integer`, ≥ 1) — jamais une chaîne libre.
+    - `slug` : motif strict `^[a-z]{2}/[a-z0-9-]+$` (pays ISO2 + identifiant).
+    Le serveur ne fait de requêtes sortantes que vers une **allowlist d'hôtes**
+    (voir `x-outbound-allowlist` ci-dessous) ; toute IP privée / loopback /
+    link-local (169.254.169.254, 127.0.0.1, 10/8, 192.168/16, `file://`, …) est
+    refusée. Les entrées invalides renvoient `400` (schéma `Error`).
+
+  x-outbound-allowlist:
+    description: >-
+      Seuls ces hôtes sortants sont autorisés côté serveur. Toute autre
+      destination (et toute IP privée/loopback/link-local) est bloquée avant le
+      fetch. Le client ne peut jamais influencer cette liste.
+    hosts:
+      - tn.tunisiebooking.com        # Tier 1 — prix vérifié Tunisie (gratuit)
+      - www.google.com               # Tier 0 — Google Hotels (google-hotels-rate)
+      - serpapi.com                  # Tier 0 — clé API (métasearch)
+      - api.apify.com                # Tier 0 — clé API (breadth OTA)
+      - open.er-api.com              # FX EUR/TND
+      - nominatim.openstreetmap.org  # geo ville -> pays
+      - www.booking.com              # Tier 3 — navigateur (signal), slug interne uniquement
+  contact:
+    name: hotel-deal-finder (interne)
+  license:
+    name: Usage interne / perso — non redistribuable
+
+servers:
+  - url: http://localhost:3000
+    description: Bind localhost uniquement (ne pas exposer publiquement — voir modèle de menace §7).
+
+tags:
+  - name: system
+    description: Santé et diagnostic.
+  - name: search
+    description: Résolution d'hôtels candidats à partir d'un nom ou d'une ville.
+  - name: rank
+    description: Classement d'offres vérifiées pour un hôtel + fenêtre de dates.
+  - name: price
+    description: Prix d'un hôtel identifié par id numérique.
+
+security:
+  - bearerAuth: []
+
+paths:
+  /api/health:
+    get:
+      tags: [system]
+      summary: Vérification de vivacité.
+      operationId: getHealth
+      security: []
+      responses:
+        "200":
+          description: Le service et ses dépendances de base répondent.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+              example:
+                status: ok
+                version: 1.0.0
+                uptimeSeconds: 4213
+                checks:
+                  fx: ok
+                  cache: ok
+
+  /api/search:
+    post:
+      tags: [search]
+      summary: Rechercher des hôtels candidats (nom OU ville).
+      description: >-
+        Résout une requête libre (nom d'hôtel, ou ville + pays optionnel) en une
+        liste d'hôtels candidats avec leurs identifiants de canal (via
+        `discover-hotel` + `geo`). N'accepte aucune URL. Renvoie `400` si ni
+        `name` ni `city` n'est fourni.
+      operationId: searchHotels
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SearchRequest"
+            examples:
+              parNom:
+                summary: Par nom d'hôtel
+                value: { name: "La Cigale Tabarka", city: "Tabarka" }
+              parVille:
+                summary: Par ville + pays
+                value: { city: "Tabarka", country: "TN" }
+      responses:
+        "200":
+          description: Hôtels candidats résolus.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchResponse"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "502": { $ref: "#/components/responses/UpstreamBlocked" }
+
+  /api/rank:
+    post:
+      tags: [rank]
+      summary: Classer les offres d'un hôtel (ou liste) sur une fenêtre de dates.
+      description: >-
+        Cœur de l'agent : enveloppe `find-best-rate`. On désigne l'hôtel par
+        `slug` (motif strict) OU par une liste de `slugs` ; jamais par URL.
+        On fournit une fenêtre de dates (`window` START..END + `nights`, ou
+        `checkin`/`checkout`) et les occupants (`adults` + `childrenAges[]`).
+        Renvoie le classement des offres normalisées, le meilleur prix corroboré
+        ou non, le `channelPlan` pays, le bloc `fx` et les signaux non vérifiés.
+      operationId: rankOffers
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RankRequest"
+            examples:
+              fenetreFlexible:
+                summary: Fenêtre flexible 2 nuits, 2 adultes + 1 enfant (10 ans)
+                value:
+                  slug: "tn/la-cigale-tabarka"
+                  window: "2026-07-14..2026-07-20"
+                  nights: 2
+                  occupants: { adults: 2, childrenAges: [10] }
+                  currency: EUR
+              datesFixes:
+                summary: Dates fixes
+                value:
+                  slug: "tn/la-cigale-tabarka"
+                  checkin: "2026-07-14"
+                  checkout: "2026-07-16"
+                  occupants: { adults: 2, childrenAges: [] }
+      responses:
+        "200":
+          description: Rapport de classement (peut être `no_price` sans erreur).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RankResponse"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "502": { $ref: "#/components/responses/UpstreamBlocked" }
+
+  /api/hotels/{id}/price:
+    get:
+      tags: [price]
+      summary: Prix vérifié d'un hôtel identifié par id NUMÉRIQUE.
+      description: >-
+        Prix direct d'un hôtel désigné par un **id entier** (jamais une URL ni
+        une chaîne libre). Dates et occupants passent en query. Enveloppe le
+        canal vérifié du pays de l'hôtel (Tunisie → `tunisiebooking-rate`).
+      operationId: getHotelPrice
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Identifiant numérique de l'hôtel (entier ≥ 1). Anti-SSRF.
+          schema:
+            type: integer
+            minimum: 1
+          example: 354
+        - name: checkin
+          in: query
+          required: true
+          schema: { $ref: "#/components/schemas/IsoDate" }
+          example: "2026-07-14"
+        - name: checkout
+          in: query
+          required: true
+          schema: { $ref: "#/components/schemas/IsoDate" }
+          example: "2026-07-16"
+        - name: adults
+          in: query
+          required: true
+          schema: { type: integer, minimum: 1, maximum: 8 }
+          example: 2
+        - name: childrenAges
+          in: query
+          required: false
+          description: Âges des enfants (années), séparés par virgule. Ex. `10,4`.
+          schema:
+            type: array
+            maxItems: 6
+            items: { type: integer, minimum: 0, maximum: 17 }
+          style: form
+          explode: false
+          example: [10]
+        - name: currency
+          in: query
+          required: false
+          schema: { $ref: "#/components/schemas/Currency" }
+      responses:
+        "200":
+          description: Offres vérifiées pour l'hôtel (peut être `no_price`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PriceResponse"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "502": { $ref: "#/components/responses/UpstreamBlocked" }
+
+components:
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: >-
+        Jeton statique interne (env only). L'API doit rester bindée sur
+        localhost/VPN ; l'auth est une défense en profondeur, pas la seule.
+
+  responses:
+    BadRequest:
+      description: Validation stricte échouée (schéma, slug, id, URL interdite, dates).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          examples:
+            slugInvalide:
+              value:
+                error: validation_error
+                message: "slug ne respecte pas ^[a-z]{2}/[a-z0-9-]+$"
+                details: [{ field: slug, issue: pattern }]
+            urlInterdite:
+              value:
+                error: validation_error
+                message: "Aucune URL n'est acceptée en entrée (anti-SSRF)."
+                details: [{ field: url, issue: forbidden }]
+    NotFound:
+      description: Hôtel/slug/id introuvable (non résolu dans le cache/canaux).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example:
+            error: not_found
+            message: "Aucun hôtel pour ce slug."
+    TooManyRequests:
+      description: Rate-limit par client (protège l'IP sortante du bannissement).
+      headers:
+        Retry-After:
+          description: Secondes avant nouvelle tentative.
+          schema: { type: integer, minimum: 1 }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example:
+            error: rate_limited
+            message: "Trop de requêtes ; réessayez plus tard."
+    UpstreamBlocked:
+      description: >-
+        Canal amont bloqué/indisponible (anti-bot, timeout, dérive markup).
+        Renvoyé quand aucun canal ne peut produire un prix pour une raison
+        technique amont (distinct de `no_price` métier renvoyé en 200).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          examples:
+            bloque:
+              value:
+                error: upstream_blocked
+                message: "Canal TunisieBooking bloqué (anti-bot)."
+                channelStatus: blocked
+            drift:
+              value:
+                error: upstream_blocked
+                message: "Dérive de markup détectée — parser à mettre à jour."
+                channelStatus: drift
+
+  schemas:
+
+    # ---- primitives / value objects ----------------------------------------
+
+    IsoDate:
+      type: string
+      format: date
+      pattern: '^\d{4}-\d{2}-\d{2}$'
+      description: Date ISO YYYY-MM-DD.
+      example: "2026-07-14"
+
+    Currency:
+      type: string
+      enum: [EUR, TND, USD, GBP]
+      description: Devises supportées (FX ancré EUR).
+      example: EUR
+
+    CountryCode:
+      type: string
+      pattern: '^[A-Z]{2}$'
+      description: Code pays ISO-3166 alpha-2.
+      example: TN
+
+    Slug:
+      type: string
+      pattern: '^[a-z]{2}/[a-z0-9-]+$'
+      maxLength: 80
+      description: >-
+        Identifiant d'hôtel stable et SÛR : pays ISO2 minuscule + `/` +
+        identifiant `[a-z0-9-]`. Jamais une URL. Ex. `tn/la-cigale-tabarka`.
+      example: "tn/la-cigale-tabarka"
+
+    OfferStatus:
+      type: string
+      enum: [verified, signal, no_price, blocked, drift, error]
+      description: >-
+        Statut honnête d'une offre/canal. `verified` = prix daté réel ;
+        `signal` = observé mais occupation/room non garantis ; `no_price` = rien
+        pour ces dates ; `blocked` = anti-bot ; `drift` = markup changé ;
+        `error` = échec technique.
+
+    Board:
+      type: string
+      description: Régime (pension). `unknown` autorisé.
+      enum: [breakfast, half-board, full-board, all-inclusive, room-only, unknown]
+      example: half-board
+
+    Occupants:
+      type: object
+      additionalProperties: false
+      required: [adults]
+      properties:
+        adults:
+          type: integer
+          minimum: 1
+          maximum: 8
+          example: 2
+        childrenAges:
+          type: array
+          maxItems: 6
+          items: { type: integer, minimum: 0, maximum: 17 }
+          default: []
+          description: >-
+            Âges des enfants en années. La politique enfant réelle appartient au
+            canal (ex. TunisieBooking facture 2+ comme adulte).
+          example: [10]
+
+    Fx:
+      type: object
+      additionalProperties: false
+      description: Bloc de conversion, aligné sur lib/fx.mjs. `stale=true` = taux de repli épinglé.
+      required: [pair, rate, stale, source]
+      properties:
+        pair: { type: string, example: "EUR/TND" }
+        rate: { type: number, example: 3.37 }
+        stale: { type: boolean, description: "true si repli épinglé (live indisponible)." }
+        asOf: { type: [string, "null"], format: date-time }
+        source: { type: string, example: "open.er-api.com" }
+
+    Geo:
+      type: object
+      additionalProperties: false
+      description: Détection ville -> pays (lib/geo.mjs, Nominatim).
+      properties:
+        detectedCity: { type: [string, "null"], example: "Tabarka" }
+        country: { $ref: "#/components/schemas/CountryCode" }
+        countryName: { type: [string, "null"], example: "Tunisie" }
+        source: { type: [string, "null"], example: "nominatim" }
+
+    ChannelPlanEntry:
+      type: object
+      additionalProperties: false
+      properties:
+        channel: { type: string, example: "TunisieBooking" }
+        tier: { type: integer, minimum: 0, maximum: 3, example: 1 }
+        note: { type: [string, "null"] }
+
+    ChannelPlan:
+      type: object
+      additionalProperties: false
+      description: Plan de canaux par pays (lib/country-router.mjs), issu du config cité.
+      required: [country, matched, pricedNow, alsoCheck]
+      properties:
+        country: { $ref: "#/components/schemas/CountryCode" }
+        region: { type: [string, "null"], example: "North Africa" }
+        matched:
+          type: boolean
+          description: true si le pays a une entrée dédiée ; false = plan par défaut.
+        countrySource:
+          type: string
+          enum: [explicit, cache, geo-detected, default]
+        pricedNow:
+          type: array
+          description: Canaux avec un outil implémenté (tarifés maintenant).
+          items: { type: string }
+          example: ["TunisieBooking", "Google Hotels"]
+        alsoCheck:
+          type: array
+          description: Canaux forts sans outil (à vérifier manuellement/clé).
+          items: { $ref: "#/components/schemas/ChannelPlanEntry" }
+        globalApi:
+          type: [string, "null"]
+          description: État de la couverture mondiale (clé API présente ou non).
+        note: { type: [string, "null"] }
+
+    # ---- Offer : schéma d'offre RÉEL des modules ---------------------------
+
+    Offer:
+      type: object
+      additionalProperties: false
+      description: >-
+        Offre normalisée telle que produite par les modules canaux
+        (`tunisiebooking-rate`, `apify-hotel-rates`, `browser-rate`) puis
+        enrichie par l'orchestrateur (`eur`, `window`). Les champs nullables
+        traduisent l'honnêteté du canal (room/board inconnus, occupation non
+        vérifiée) plutôt qu'une invention.
+      required: [channel, board, checkin, checkout, total, currency, status]
+      properties:
+        channel: { type: string, example: "TunisieBooking" }
+        hotel:
+          type: string
+          description: Étiquette d'hôtel côté canal (ex. `hotel_354`).
+          example: "hotel_354"
+        room:
+          type: string
+          description: Type de chambre si le canal l'expose ; "" sinon.
+          example: "Chambre Double Vue Jardin"
+        board: { $ref: "#/components/schemas/Board" }
+        checkin: { $ref: "#/components/schemas/IsoDate" }
+        checkout: { $ref: "#/components/schemas/IsoDate" }
+        nights: { type: integer, minimum: 1, example: 2 }
+        window:
+          type: [string, "null"]
+          description: Fenêtre "checkin→checkout" ajoutée par l'orchestrateur.
+          example: "2026-07-14→2026-07-16"
+        total:
+          type: number
+          description: Total séjour dans `currency` (taxes/frais du canal inclus).
+          example: 812
+        currency: { $ref: "#/components/schemas/Currency" }
+        totalTND: { type: [number, "null"], example: 812 }
+        totalEUR: { type: [number, "null"], example: 241.0 }
+        eur:
+          type: [number, "null"]
+          description: Total converti en EUR par l'orchestrateur (clé de tri).
+          example: 241.0
+        baseBeforeFee: { type: [number, "null"], description: Total avant frais de dossier canal. }
+        feePct: { type: [number, "null"], description: "% de frais ajouté par le canal (ex. 2)." }
+        cancellation:
+          type: string
+          enum: [free, non-refundable, unknown]
+          default: unknown
+        status: { $ref: "#/components/schemas/OfferStatus" }
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Confiance du canal (0.9 vérifié TB, 0.6 Apify, 0.5 browser).
+          example: 0.9
+        occupancyVerified:
+          type: [boolean, "null"]
+          description: >-
+            true si l'occupation exacte a été appliquée et confirmée. false =
+            prix "signal" (headline/room non confirmé) — jamais classé comme best.
+        occupancyNote: { type: [string, "null"] }
+        priceRange:
+          type: [object, "null"]
+          additionalProperties: false
+          properties:
+            min: { type: number }
+            max: { type: number }
+        candidates:
+          type: array
+          description: Prix candidats observés (browser) — transparence signal.
+          items: { type: number }
+        sourceUrl:
+          type: [string, "null"]
+          description: URL de la page source (SORTIE informative uniquement, jamais rejouée depuis une entrée client).
+          example: "https://tn.tunisiebooking.com/detail_hotel_354/"
+        verifiedAt: { type: [string, "null"], format: date-time }
+
+    Hotel:
+      type: object
+      additionalProperties: false
+      description: Hôtel candidat résolu (cache/discovery).
+      required: [slug, displayName]
+      properties:
+        slug: { $ref: "#/components/schemas/Slug" }
+        displayName: { type: string, example: "La Cigale Tabarka Hôtel Thalasso, Spa & Golf" }
+        city: { type: [string, "null"], example: "Tabarka" }
+        country: { $ref: "#/components/schemas/CountryCode" }
+        hotelId:
+          type: [integer, "null"]
+          minimum: 1
+          description: Id numérique côté canal vérifié (ex. TunisieBooking 354).
+          example: 354
+        channels:
+          type: array
+          description: Canaux résolus pour cet hôtel.
+          items: { type: string }
+          example: ["tunisiebooking", "googleHotels"]
+        childPolicy: { type: [string, "null"] }
+        resolution:
+          type: string
+          enum: [resolved, partial]
+          description: partial = certains ids de canal manquants.
+
+    # ---- request bodies -----------------------------------------------------
+
+    SearchRequest:
+      type: object
+      additionalProperties: false
+      description: >-
+        Exactement l'un de `name` ou `city` requis. Aucune URL acceptée.
+      minProperties: 1
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 120
+          pattern: "^[\\p{L}0-9 '&.,\\-]+$"
+          description: Nom d'hôtel (texte, pas d'URL).
+          example: "La Cigale Tabarka"
+        city:
+          type: string
+          minLength: 2
+          maxLength: 80
+          pattern: "^[\\p{L} '\\-]+$"
+          example: "Tabarka"
+        country: { $ref: "#/components/schemas/CountryCode" }
+      anyOf:
+        - required: [name]
+        - required: [city]
+
+    RankRequest:
+      type: object
+      additionalProperties: false
+      description: >-
+        Désigne l'hôtel par `slug` OU `slugs[]` (jamais par URL). Fenêtre de
+        dates par `window`+`nights` OU `checkin`+`checkout`.
+      required: [occupants]
+      properties:
+        slug: { $ref: "#/components/schemas/Slug" }
+        slugs:
+          type: array
+          minItems: 1
+          maxItems: 10
+          items: { $ref: "#/components/schemas/Slug" }
+        window:
+          type: string
+          pattern: '^\d{4}-\d{2}-\d{2}\.\.\d{4}-\d{2}-\d{2}$'
+          description: Fenêtre flexible START..END (ISO). À combiner avec `nights`.
+          example: "2026-07-14..2026-07-20"
+        nights:
+          type: integer
+          minimum: 1
+          maximum: 30
+          default: 2
+        checkin: { $ref: "#/components/schemas/IsoDate" }
+        checkout: { $ref: "#/components/schemas/IsoDate" }
+        occupants: { $ref: "#/components/schemas/Occupants" }
+        currency:
+          allOf: [{ $ref: "#/components/schemas/Currency" }]
+          default: EUR
+        escalate:
+          type: boolean
+          default: false
+          description: >-
+            Autorise la corroboration via le navigateur (Tier 3, signal). N'ouvre
+            QUE le slug Booking interne de l'hôtel — jamais une URL du client.
+      oneOf:
+        - required: [slug]
+        - required: [slugs]
+      anyOf:
+        - required: [window]
+        - required: [checkin, checkout]
+
+    # ---- responses ----------------------------------------------------------
+
+    Health:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status: { type: string, enum: [ok, degraded] }
+        version: { type: string, example: "1.0.0" }
+        uptimeSeconds: { type: integer, minimum: 0 }
+        checks:
+          type: object
+          additionalProperties: { type: string, enum: [ok, fail] }
+
+    SearchResponse:
+      type: object
+      additionalProperties: false
+      required: [query, hotels]
+      properties:
+        query:
+          type: object
+          additionalProperties: false
+          properties:
+            name: { type: [string, "null"] }
+            city: { type: [string, "null"] }
+            country: { $ref: "#/components/schemas/CountryCode" }
+        geo: { $ref: "#/components/schemas/Geo" }
+        hotels:
+          type: array
+          items: { $ref: "#/components/schemas/Hotel" }
+        generatedAt: { type: string, format: date-time }
+
+    RankResponse:
+      type: object
+      additionalProperties: false
+      description: Rapport aligné sur la sortie de find-best-rate.mjs.
+      required: [query, status, fx, channelPlan, ranking]
+      properties:
+        query:
+          type: object
+          additionalProperties: false
+          properties:
+            hotel: { type: string }
+            window: { type: [string, "null"] }
+            nights: { type: integer }
+            adults: { type: integer }
+            childrenAges:
+              type: array
+              items: { type: integer }
+            childPolicy: { type: [string, "null"] }
+        generatedAt: { type: string, format: date-time }
+        status:
+          type: string
+          enum: [verified, no_price]
+          description: verified si un meilleur prix classable existe, sinon no_price.
+        fx: { $ref: "#/components/schemas/Fx" }
+        geo: { $ref: "#/components/schemas/Geo" }
+        channelPlan: { $ref: "#/components/schemas/ChannelPlan" }
+        tiersRun:
+          type: array
+          items: { type: string }
+          example: ["tier1:tunisiebooking", "tier0:google-hotels"]
+        shortCircuited:
+          type: boolean
+          description: true si deux canaux comparables se sont accordés (arrêt anticipé).
+        best:
+          type: [object, "null"]
+          additionalProperties: false
+          properties:
+            channel: { type: string }
+            room: { type: string }
+            board: { $ref: "#/components/schemas/Board" }
+            window: { type: string }
+            totalEUR: { type: [number, "null"] }
+            totalTND: { type: [number, "null"] }
+            sourceUrl: { type: [string, "null"] }
+            corroborated: { type: boolean }
+            corroboratedBy:
+              type: [object, "null"]
+              additionalProperties: false
+              properties:
+                channel: { type: string }
+                priceEUR: { type: number }
+        ranking:
+          type: array
+          description: Offres classables (occupation vérifiée), prix croissant.
+          items: { $ref: "#/components/schemas/Offer" }
+        unverifiedOccupancy:
+          type: array
+          description: Prix "signal" écartés du classement (occupation non vérifiée).
+          items:
+            type: object
+            additionalProperties: false
+            properties:
+              channel: { type: string }
+              priceEUR: { type: number }
+              note: { type: string }
+        browserObserved:
+          type: array
+          description: Prix navigateur non étiquetés (signal de corroboration).
+          items:
+            type: object
+            additionalProperties: false
+            properties:
+              channel: { type: string }
+              priceEUR: { type: number }
+              note: { type: string }
+        channels:
+          type: array
+          items: { type: string }
+        escalation:
+          type: array
+          description: Conseils lisibles (quand relancer, canal manquant).
+          items: { type: string }
+
+    PriceResponse:
+      type: object
+      additionalProperties: false
+      required: [query, status, offers]
+      properties:
+        query:
+          type: object
+          additionalProperties: false
+          properties:
+            hotelId: { type: integer }
+            checkin: { $ref: "#/components/schemas/IsoDate" }
+            checkout: { $ref: "#/components/schemas/IsoDate" }
+            nights: { type: integer }
+            adults: { type: integer }
+            childrenAges:
+              type: array
+              items: { type: integer }
+            currency: { $ref: "#/components/schemas/Currency" }
+        generatedAt: { type: string, format: date-time }
+        status: { $ref: "#/components/schemas/OfferStatus" }
+        source: { type: [string, "null"], example: "TunisieBooking (browserless)" }
+        fx: { $ref: "#/components/schemas/Fx" }
+        note: { type: [string, "null"] }
+        offers:
+          type: array
+          items: { $ref: "#/components/schemas/Offer" }
+
+    Error:
+      type: object
+      additionalProperties: false
+      required: [error, message]
+      properties:
+        error:
+          type: string
+          enum: [validation_error, not_found, rate_limited, upstream_blocked, internal_error]
+        message: { type: string }
+        channelStatus:
+          type: string
+          enum: [blocked, drift, error]
+          description: Présent pour upstream_blocked (raison amont).
+        details:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            properties:
+              field: { type: string }
+              issue: { type: string }
