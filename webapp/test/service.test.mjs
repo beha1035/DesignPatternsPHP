@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 import { searchHotels, priceHotel, rankOffers, mergeRankReports } from "../service.mjs";
+import { CACHE_HIT } from "../lib/cache.mjs";
 import { HostLimiter, CircuitBreaker } from "../lib/pacing.mjs";
 import { TTLCache } from "../lib/cache.mjs";
 import { NotFoundError, UpstreamBlockedError } from "../lib/errors.mjs";
@@ -116,7 +117,10 @@ test("priceHotel: a second identical call is served from cache (smartGet not cal
   const second = await priceHotel(req, deps);
   assert.equal(calls, 2, "one smartGet call per board (2 boards) on the FIRST request only");
   assert.equal(first.offers[0].total, second.offers[0].total);
-  assert.equal(second.fromCache, true);
+  // Cache hit is signalled by a Symbol, not a body field...
+  assert.equal(second[CACHE_HIT], true);
+  // ...and MUST NOT leak into the serialized body (additionalProperties:false).
+  assert.ok(!("fromCache" in JSON.parse(JSON.stringify(second))), "no fromCache field in the JSON body");
 });
 
 test("priceHotel: a different occupancy is NOT served from the other occupancy's cache entry", async () => {

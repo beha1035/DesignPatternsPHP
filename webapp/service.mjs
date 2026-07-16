@@ -37,7 +37,7 @@ import { extractPairs, bestMatch, citySlug, slugify } from "../.claude/agents/to
 import { analyze } from "../.claude/agents/tools/tunisiebooking-rate.mjs";
 
 import { HostLimiter, CircuitBreaker, withPacing, DEFAULT_LIMITS } from "./lib/pacing.mjs";
-import { TTLCache, offerCacheKey, ttlForStatus, TTL_MS } from "./lib/cache.mjs";
+import { TTLCache, offerCacheKey, ttlForStatus, TTL_MS, CACHE_HIT } from "./lib/cache.mjs";
 import { NotFoundError, UpstreamBlockedError } from "./lib/errors.mjs";
 import { parseSlugParts } from "./lib/validate.mjs";
 
@@ -294,7 +294,7 @@ export async function priceHotel(req, deps = defaultDeps()) {
     channel: "tunisiebooking", hotelId, checkin, checkout, adults, childrenAges, board: "any", currency,
   });
   const cached = deps.priceCache.get(cacheKey);
-  if (cached) return { ...cached, generatedAt: new Date().toISOString(), fromCache: true };
+  if (cached) return Object.assign({ ...cached, generatedAt: new Date().toISOString() }, { [CACHE_HIT]: true });
 
   const host = "tn.tunisiebooking.com";
   if (deps.breaker.isOpen(host)) {
@@ -469,7 +469,7 @@ export async function rankOffers(req, deps = defaultDeps()) {
     currency,
   });
   const cached = deps.rankCache.get(cacheKey);
-  if (cached) return { ...cached, generatedAt: new Date().toISOString(), fromCache: true };
+  if (cached) return Object.assign({ ...cached, generatedAt: new Date().toISOString() }, { [CACHE_HIT]: true });
 
   const reports = [];
   for (const { key } of resolvedKeys) {

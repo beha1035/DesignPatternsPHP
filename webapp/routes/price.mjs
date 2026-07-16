@@ -2,6 +2,7 @@
 import { Router } from "express";
 import { parsePricePath, parsePriceQuery } from "../lib/validate.mjs";
 import { ValidationError } from "../lib/errors.mjs";
+import { CACHE_HIT } from "../lib/cache.mjs";
 
 export function priceRouter({ priceHotel }) {
   const router = Router();
@@ -12,6 +13,7 @@ export function priceRouter({ priceHotel }) {
       const query = parsePriceQuery(req.query);
       if (!query.ok) throw new ValidationError(query.message, query.details);
       const result = await priceHotel({ hotelId: path.data.id, ...query.data });
+      res.set("X-Cache", result[CACHE_HIT] ? "HIT" : "MISS");
       res.json(result);
     } catch (e) {
       next(e);

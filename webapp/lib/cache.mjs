@@ -8,6 +8,11 @@
 
 import { createHash } from "node:crypto";
 
+// Cache-hit is signalled with a Symbol property, NOT a body field: JSON.stringify
+// (and res.json) skip symbol keys, so the response stays schema-conformant
+// (additionalProperties:false) while routes can still read it to set X-Cache.
+export const CACHE_HIT = Symbol("cacheHit");
+
 export const TTL_MS = Object.freeze({
   verified: 30 * 60 * 1000, // 30 min
   no_price: 10 * 60 * 1000, // 10 min

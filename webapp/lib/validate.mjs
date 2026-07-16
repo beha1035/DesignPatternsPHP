@@ -85,6 +85,10 @@ export const RankRequestSchema = RankRequestBase.superRefine((v, ctx) => {
   if (!hasWindow && !hasFixed) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["window"], message: "one of `window` or `checkin`+`checkout` is required" });
   }
+  // Reject providing BOTH — ambiguous which date source drives the sweep.
+  if (hasWindow && (v.checkin != null || v.checkout != null)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["window"], message: "provide EITHER `window` OR `checkin`+`checkout`, not both" });
+  }
   if ((v.checkin != null) !== (v.checkout != null)) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["checkout"], message: "checkin and checkout must be provided together" });
   }
