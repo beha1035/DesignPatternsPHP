@@ -4,6 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { parseMoney, pickStayTotal, bookingUrl } from "../browser-rate.mjs";
+import { assertSafeUrl } from "../lib/net-guard.mjs";
 
 test("parseMoney handles currencies and locale separators", () => {
   assert.equal(parseMoney("€ 797"), 797);
@@ -25,6 +26,15 @@ test("pickStayTotal ignores junk below the plausibility floor", () => {
 
 test("pickStayTotal returns null when everything is junk", () => {
   assert.equal(pickStayTotal(["€1", "€5", ""]).total, null);
+});
+
+test("the SSRF gate (bookingUrl + assertSafeUrl) allows Booking, blocks a hostile --booking-url", () => {
+  // A slug-built URL targets the allowlisted host -> passes the gate.
+  const ok = bookingUrl({ slug: "tn/tabarka-beach", checkin: "2026-07-14", checkout: "2026-07-16", adults: 2, children: [10] });
+  assert.ok(assertSafeUrl(ok));
+  // A free --booking-url to an internal/arbitrary host -> rejected before goto.
+  assert.throws(() => assertSafeUrl(bookingUrl({ url: "https://169.254.169.254/", checkin: "2026-07-14", checkout: "2026-07-16", adults: 2 })), /IP-literal/);
+  assert.throws(() => assertSafeUrl(bookingUrl({ url: "https://evil.example.com/x", checkin: "2026-07-14", checkout: "2026-07-16", adults: 2 })), /allowlist/);
 });
 
 test("bookingUrl pins the exact party (adults, child ages, currency)", () => {

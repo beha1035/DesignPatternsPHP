@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import "./lib/net-guard.mjs"; // SSRF guard (deprecated tool; consistency)
 // amadeus-rate — DEPRECATED. The Amadeus for Developers Self-Service portal is
 // decommissioned on 2026-07-17; new self-service keys are no longer viable.
 // Prefer google-hotels-rate.mjs (SerpApi/Google Hotels) as the validation path.
