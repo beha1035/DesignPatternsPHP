@@ -1,0 +1,20 @@
+{
+  "name": "hotel-deal-finder-webapp",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Backend API (Express) for hotel-deal-finder, strictly conforming to docs/api/openapi.yaml.",
+  "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "dev": "node --watch server.mjs",
+    "test": "node --test test/"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "helmet": "^7.1.0",
+    "zod": "^3.23.8"
+  }
+}
