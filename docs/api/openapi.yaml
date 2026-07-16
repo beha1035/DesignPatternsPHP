@@ -28,6 +28,7 @@ info:
     link-local (169.254.169.254, 127.0.0.1, 10/8, 192.168/16, `file://`, …) est
     refusée. Les entrées invalides renvoient `400` (schéma `Error`).
 
+  x-max-window-days: 30   # server rejects a --window whose START..END span exceeds this
   x-outbound-allowlist:
     description: >-
       Seuls ces hôtes sortants sont autorisés côté serveur. Toute autre
@@ -422,6 +423,16 @@ components:
     Offer:
       type: object
       additionalProperties: false
+      # Honesty invariant enforced by the schema (not just prose): a `verified`
+      # offer can never carry occupancyVerified:false. A signal price must use a
+      # non-verified status. Contract tests will exercise this.
+      allOf:
+        - if:
+            properties: { status: { const: verified } }
+            required: [status]
+          then:
+            properties:
+              occupancyVerified: { not: { const: false } }
       description: >-
         Offre normalisée telle que produite par les modules canaux
         (`tunisiebooking-rate`, `apify-hotel-rates`, `browser-rate`) puis
@@ -563,7 +574,13 @@ components:
         window:
           type: string
           pattern: '^\d{4}-\d{2}-\d{2}\.\.\d{4}-\d{2}-\d{2}$'
-          description: Fenêtre flexible START..END (ISO). À combiner avec `nights`.
+          description: >-
+            Fenêtre flexible START..END (ISO), à combiner avec `nights`. Le
+            serveur REJETTE (400 validation_error) toute fenêtre où START >= END
+            ou dont l'écart dépasse `x-max-window-days` (30) — un pattern seul ne
+            peut pas le vérifier. Borne le nombre de séjours balayés (≤ ~29) donc
+            le nombre de requêtes sortantes déclenchées par un appel (menace #4,
+            bannissement IP auto-infligé).
           example: "2026-07-14..2026-07-20"
         nights:
           type: integer

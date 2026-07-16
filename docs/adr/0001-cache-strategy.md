@@ -40,7 +40,10 @@ Deux besoins distincts :
 **2. Pacing indépendant, appliqué AVANT le cache-miss.**
 
 - **Concurrence plafonnée par hôte** (reprend `mapLimit`, généralisée en pool global) :
-  au plus **2** requêtes simultanées vers `tn.tunisiebooking.com`.
+  au plus **2** requêtes simultanées vers `tn.tunisiebooking.com` ; au plus **1**
+  session simultanée vers `www.booking.com` (Tier 3, navigateur Chromium — canal
+  le plus coûteux/risqué, menace #8) ; **1** vers `api.apify.com`. Chaque hôte
+  sortant a une limite chiffrée, pas seulement TunisieBooking.
 - **Débit** : file d'attente + intervalle minimal entre requêtes sortantes par hôte.
 - **Backoff exponentiel + circuit-breaker** sur `blocked`/timeout (déjà des timeouts
   par tier dans l'orchestrateur) : après N échecs consécutifs, ouvrir le circuit et
