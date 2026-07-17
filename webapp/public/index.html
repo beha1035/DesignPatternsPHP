@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<!-- Defense-in-depth CSP (also sent as a header by server.mjs via helmet).
+     No inline scripts/styles anywhere in this app. -->
+<meta
+  http-equiv="Content-Security-Policy"
+  content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; font-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"
+/>
+<title>hotel-deal-finder</title>
+<link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+<a class="skip-link" href="#main">Aller au contenu principal</a>
+
+<header class="site-header">
+  <h1>hotel-deal-finder</h1>
+  <p class="tagline">
+    Prix <strong>vérifiés</strong> (Tunisie) et <strong>signaux</strong> (reste du monde) — jamais confondus.
+  </p>
+</header>
+
+<section class="settings" aria-label="Réglages">
+  <button id="settings-toggle" type="button" aria-expanded="false" aria-controls="settings-panel">
+    Réglages (jeton API)
+  </button>
+  <div id="settings-panel" hidden>
+    <form id="settings-form">
+      <label for="token-input">
+        Jeton API (Bearer) — stocké uniquement dans votre navigateur (localStorage), jamais transmis ailleurs
+        qu'à cette API, jamais commité.
+      </label>
+      <input id="token-input" name="token" type="password" autocomplete="off" />
+      <button type="submit" class="btn">Enregistrer</button>
+      <span id="token-status" role="status" aria-live="polite"></span>
+    </form>
+  </div>
+</section>
+
+<main id="main">
+  <section aria-labelledby="search-heading" class="panel">
+    <h2 id="search-heading">Rechercher un hôtel</h2>
+    <form id="search-form" novalidate>
+      <fieldset>
+        <legend>Hôtel ou ville</legend>
+        <div class="field">
+          <label for="name-input">Nom d'hôtel</label>
+          <input id="name-input" name="name" type="text" autocomplete="off" placeholder="La Cigale Tabarka" />
+        </div>
+        <div class="field">
+          <label for="city-input">Ville</label>
+          <input id="city-input" name="city" type="text" autocomplete="off" placeholder="Tabarka" />
+        </div>
+        <div class="field">
+          <label for="country-input">Pays (ISO2, optionnel)</label>
+          <input id="country-input" name="country" type="text" maxlength="2" placeholder="TN" />
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Dates</legend>
+        <div class="field-inline">
+          <label><input type="radio" name="dateMode" value="window" checked /> Fenêtre flexible</label>
+          <label><input type="radio" name="dateMode" value="fixed" /> Dates fixes</label>
+        </div>
+        <div class="field-group" id="window-fields">
+          <div class="field">
+            <label for="window-start">Du</label>
+            <input id="window-start" type="date" />
+          </div>
+          <div class="field">
+            <label for="window-end">Au (fin de la fenêtre de recherche)</label>
+            <input id="window-end" type="date" />
+          </div>
+          <div class="field">
+            <label for="nights-input">Nuits par séjour</label>
+            <input id="nights-input" type="number" min="1" max="30" value="2" />
+          </div>
+        </div>
+        <div class="field-group" id="fixed-fields" hidden>
+          <div class="field">
+            <label for="checkin-input">Arrivée</label>
+            <input id="checkin-input" type="date" />
+          </div>
+          <div class="field">
+            <label for="checkout-input">Départ</label>
+            <input id="checkout-input" type="date" />
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Occupants</legend>
+        <div class="field">
+          <label for="adults-input">Adultes</label>
+          <input id="adults-input" type="number" min="1" max="8" value="2" />
+        </div>
+        <div id="children-list" class="children-list"></div>
+        <button type="button" id="add-child-btn" class="btn">Ajouter un enfant</button>
+      </fieldset>
+
+      <div id="search-errors" class="errors" role="alert" aria-live="assertive"></div>
+      <button type="submit" id="search-submit" class="btn btn-primary">Rechercher</button>
+    </form>
+  </section>
+
+  <section aria-labelledby="hotels-heading" class="panel">
+    <h2 id="hotels-heading">Hôtels trouvés</h2>
+    <div id="hotels-status" role="status" aria-live="polite" class="status-line"></div>
+    <div id="hotels-results"></div>
+  </section>
+
+  <section aria-labelledby="results-heading" class="panel">
+    <div class="results-header">
+      <h2 id="results-heading">Classement des offres</h2>
+      <div class="currency-toggle" role="group" aria-label="Devise d'affichage">
+        <button type="button" id="currency-eur" class="btn btn-toggle" aria-pressed="true">EUR</button>
+        <button type="button" id="currency-tnd" class="btn btn-toggle" aria-pressed="false">TND</button>
+      </div>
+    </div>
+    <div id="fx-info" class="fx-info"></div>
+    <div id="channel-plan-info"></div>
+    <div id="rank-status" role="status" aria-live="polite" class="status-line"></div>
+    <div id="rank-results"></div>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <p>
+    Usage interne / personnel. Un badge « Signal » n'est jamais un prix ferme — voir
+    <code>docs/adr/0003-price-scope.md</code>.
+  </p>
+</footer>
+
+<script type="module" src="/js/app.js"></script>
+</body>
+</html>

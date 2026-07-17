@@ -5,7 +5,8 @@
 
 import express from "express";
 import helmet from "helmet";
-import { pathToFileURL } from "node:url";
+import { pathToFileURL, fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 
 import { installGlobalFetchGuard } from "./lib/ssrf-guard.mjs";
 import { createLogger } from "./lib/logger.mjs";
@@ -25,8 +26,10 @@ import { priceRouter } from "./routes/price.mjs";
 installGlobalFetchGuard();
 
 const logger = createLogger();
+const HERE = dirname(fileURLToPath(import.meta.url));
+const DEFAULT_PUBLIC_DIR = join(HERE, "public");
 
-export function createApp({ bearerToken = process.env.API_BEARER_TOKEN, service, rateLimit } = {}) {
+export function createApp({ bearerToken = process.env.API_BEARER_TOKEN, service, rateLimit, publicDir = DEFAULT_PUBLIC_DIR } = {}) {
   if (!bearerToken) {
     throw new Error(
       "API_BEARER_TOKEN is not set. Set it in the environment (never hardcode it) before starting the server."
@@ -40,7 +43,25 @@ export function createApp({ bearerToken = process.env.API_BEARER_TOKEN, service,
   app.disable("x-powered-by");
   app.use(
     helmet({
-      contentSecurityPolicy: { directives: { defaultSrc: ["'none'"] } },
+      // Strict CSP covering BOTH the JSON API and the static frontend
+      // (webapp/public/): same-origin only, no inline scripts/styles, no
+      // plugins/frames. See webapp/public/js/render.js — the frontend never
+      // needs 'unsafe-inline' because it never builds HTML strings, only
+      // DOM nodes via textContent/createElement.
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'"],
+          styleSrc: ["'self'"],
+          imgSrc: ["'self'"],
+          connectSrc: ["'self'"],
+          fontSrc: ["'self'"],
+          objectSrc: ["'none'"],
+          baseUri: ["'none'"],
+          formAction: ["'self'"],
+          frameAncestors: ["'none'"],
+        },
+      },
       hsts: true,
       referrerPolicy: { policy: "no-referrer" },
       frameguard: { action: "deny" },
@@ -48,6 +69,18 @@ export function createApp({ bearerToken = process.env.API_BEARER_TOKEN, service,
     })
   );
   app.use(express.json({ limit: "64kb" }));
+
+  // Static frontend (webapp/public/) — served WITHOUT auth/rate-limit (it's
+  // just HTML/CSS/JS shell, no data); the UI itself supplies a bearer token
+  // (kept in the browser's localStorage, see js/app.js) on every /api call.
+  app.use(
+    express.static(publicDir, {
+      index: "index.html",
+      extensions: false,
+      dotfiles: "ignore",
+      setHeaders: (res) => res.set("X-Content-Type-Options", "nosniff"),
+    })
+  );
 
   const clientLimiter = new ClientRateLimiter(rateLimit || { windowMs: 60_000, max: 30 });
   app.use("/api", rateLimitMiddleware(clientLimiter));
