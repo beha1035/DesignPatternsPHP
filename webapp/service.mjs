@@ -283,7 +283,27 @@ async function findVilleForHotelId(deps, hotelId) {
       return { ville: entry.city || "", country: entry.country || null };
     }
   }
-  return { ville: "", country: null };
+  // Not in the seeded cache. TunisieBooking's priced endpoint REQUIRES the exact
+  // ville (empty/wrong -> silent no_price), so resolve it from the hotel's own
+  // detail page (which carries a hidden `ville` field). Memoised so it costs at
+  // most one extra request per uncached hotel.
+  const memoKey = `ville:${hotelId}`;
+  const memo = deps.geoCache.get(memoKey);
+  if (memo !== undefined) return memo;
+  let resolved = { ville: "", country: null };
+  // Guarded by the SAME host limiter as the priced calls, so this extra request
+  // counts toward the TunisieBooking concurrency ceiling (ADR 0001), not around it.
+  const release = await deps.limiter.acquire("tn.tunisiebooking.com", 1);
+  try {
+    const { status, text } = await deps.smartGet(`${TB_HOST}/detail_hotel_${hotelId}/`, { referer: `${TB_HOST}/` });
+    if (status === 200) {
+      const m = text.match(/(?:name|id)="ville"[^>]*\svalue="([^"]+)"/i);
+      if (m) resolved = { ville: m[1].trim(), country: "TN" };
+    }
+  } catch { /* leave unresolved -> honest no_price downstream */ }
+  finally { release(); }
+  deps.geoCache.set(memoKey, resolved, TTL_MS.geo);
+  return resolved;
 }
 
 export async function priceHotel(req, deps = defaultDeps()) {

@@ -54,7 +54,9 @@ function baseDeps(overrides = {}) {
     slugify: (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, ""),
     analyze,
     execFileAsync: async () => ({ status: "no_price" }),
-    readCacheFile: async () => ({}),
+    // Seed hotel 354 -> Tabarka so priceHotel(354) resolves the ville from cache
+    // (no extra detail-page fetch) — mirrors the real seeded cache entry.
+    readCacheFile: async () => ({ "la-cigale-tabarka": { tunisiebooking: { hotelId: "354" }, city: "Tabarka", country: "TN" } }),
     writeCacheFile: async () => {},
     limiter: new HostLimiter({ "tn.tunisiebooking.com": 2 }),
     breaker: new CircuitBreaker({ threshold: 3, cooldownMs: 60_000 }),
@@ -105,6 +107,28 @@ test("priceHotel: open circuit breaker fails fast without calling smartGet", asy
     UpstreamBlockedError
   );
   assert.equal(called, false);
+});
+
+test("priceHotel: an UNCACHED hotel resolves its ville from the detail page (regression: empty ville -> false no_price)", async () => {
+  // hotel 224 is not in the seeded cache. TunisieBooking needs the exact ville,
+  // so the service must fetch the detail page to learn it, else it silently
+  // returns no_price (the bug the live demo caught).
+  const detailHtml = '<input type="hidden" name="ville" id="ville" value="Tabarka">';
+  const deps = baseDeps({
+    readCacheFile: async () => ({}), // nothing cached
+    smartGet: async (url) =>
+      url.includes("/detail_hotel_224/")
+        ? { status: 200, text: detailHtml }         // ville lookup
+        : { status: 200, text: verifiedHtml },       // priced endpoint
+  });
+  const res = await priceHotel(
+    { hotelId: 224, checkin: "2026-10-03", checkout: "2026-10-05", adults: 2, childrenAges: [10], currency: "EUR" },
+    deps
+  );
+  assert.equal(res.status, "verified");
+  assert.ok(res.offers.length >= 1);
+  // And the resolved ville reached the priced request (not empty).
+  assert.ok(res.offers[0].total > 0);
 });
 
 // ---- cache proof ---------------------------------------------------------------
