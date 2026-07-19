@@ -448,9 +448,21 @@ export function normalizeRankingOffer(o) {
   const totalEUR = o?.totalEUR ?? o?.eur ?? null;
   const currency = o?.currency ?? (o?.total != null ? "TND" : "EUR");
   const total = o?.total ?? totalEUR ?? null;
+  const occupancyVerified = o?.occupancyVerified ?? true;
+  // Honesty invariant (openapi.yaml Offer allOf): status "verified" must never
+  // coexist with occupancyVerified:false. Ranking rows are verified-occupancy
+  // by construction, but this normalizer is the CONTRACT boundary and must not
+  // MINT a "verified" label for a row that explicitly says occupancy is
+  // unconfirmed — downgrade to the row's own non-verified status, else "signal".
+  const status =
+    occupancyVerified === false
+      ? (o?.status && o.status !== "verified" ? o.status : "signal")
+      : (o?.status ?? "verified");
   return {
     channel: o?.channel ?? "",
-    hotel: o?.hotel ?? null,
+    // `hotel` is non-nullable in the schema — include it only when present
+    // (omitting an optional key is schema-clean; sending null is not).
+    ...(o?.hotel != null ? { hotel: o.hotel } : {}),
     room: o?.room ?? "",
     board: o?.board ?? "unknown",
     checkin,
@@ -462,8 +474,8 @@ export function normalizeRankingOffer(o) {
     totalTND: o?.totalTND ?? (currency === "TND" ? total : null),
     totalEUR,
     eur: o?.eur ?? totalEUR,
-    status: o?.status ?? "verified",
-    occupancyVerified: o?.occupancyVerified ?? true,
+    status,
+    occupancyVerified,
     sourceUrl: o?.sourceUrl ?? null,
   };
 }

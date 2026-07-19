@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 import { searchHotels, priceHotel, rankOffers, mergeRankReports, normalizeRankingOffer, sanitizeChannelPlan } from "../service.mjs";
-import { buildUnifiedRows, sortRowsByPrice, pickBestRowIndex } from "../public/js/offers.js";
+import { buildUnifiedRows, sortRowsByPrice, pickBestRowIndex, isHonestVerifiedRow } from "../public/js/offers.js";
 import { CACHE_HIT } from "../lib/cache.mjs";
 import { HostLimiter, CircuitBreaker } from "../lib/pacing.mjs";
 import { TTLCache } from "../lib/cache.mjs";
@@ -318,6 +318,26 @@ test("normalizeRankingOffer: derives checkin/checkout from window and defaults s
   assert.equal(o.status, "verified");
   assert.equal(o.occupancyVerified, true);
   assert.equal(o.total, 300); // falls back to totalEUR when native total absent
+});
+
+test("normalizeRankingOffer: never mints status:verified for an occupancyVerified:false row (honesty invariant)", () => {
+  // The P6 re-gate's adversarial input: a row that explicitly says occupancy is
+  // unconfirmed must NOT come out labelled verified (openapi Offer allOf).
+  const o = normalizeRankingOffer({ channel: "Apify", board: "unknown", window: "2026-08-01→2026-08-03", totalEUR: 100, room: "R", occupancyVerified: false });
+  assert.equal(o.occupancyVerified, false);
+  assert.notEqual(o.status, "verified");
+  // Downstream honesty guard agrees it is not a best-eligible row.
+  assert.equal(isHonestVerifiedRow({ status: o.status, occupancyVerified: o.occupancyVerified }), false);
+  // A row already carrying a non-verified status keeps it rather than "signal".
+  const drift = normalizeRankingOffer({ channel: "X", board: "unknown", window: "2026-08-01→2026-08-03", totalEUR: 100, occupancyVerified: false, status: "drift" });
+  assert.equal(drift.status, "drift");
+});
+
+test("normalizeRankingOffer: omits `hotel` when absent (schema: hotel is non-nullable), keeps it when present", () => {
+  const without = normalizeRankingOffer({ channel: "X", board: "breakfast", window: "2026-08-01→2026-08-03", totalEUR: 100 });
+  assert.ok(!("hotel" in without), "no null hotel key");
+  const withHotel = normalizeRankingOffer({ channel: "X", hotel: "hotel_9", board: "breakfast", window: "2026-08-01→2026-08-03", totalEUR: 100 });
+  assert.equal(withHotel.hotel, "hotel_9");
 });
 
 test("sanitizeChannelPlan: keeps only contract keys, drops sources", () => {
