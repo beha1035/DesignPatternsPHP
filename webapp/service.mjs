@@ -430,6 +430,54 @@ async function runFindBestRate(deps, { hotelKey, window, checkin, checkout, nigh
   }
 }
 
+// Re-normalise a find-best-rate.mjs ranking row into the OpenAPI `Offer`
+// shape (docs/api/openapi.yaml). The webapp is the CONTRACT boundary: the
+// orchestrator is an internal tool whose stdout we do NOT trust to match the
+// public schema field-for-field. This guarantees every REQUIRED Offer field
+// (channel, board, checkin, checkout, total, currency, status) is present and
+// non-null, deriving checkin/checkout from `window` as a last resort, so the
+// UI honesty guard (public/js/offers.js `isHonestVerifiedRow`, which needs
+// status==="verified") can actually pick a best row. Ranking rows are
+// occupancy-verified by construction (find-best-rate filters
+// occupancyVerified===false out before ranking), hence the "verified" default.
+export function normalizeRankingOffer(o) {
+  const [wci, wco] =
+    typeof o?.window === "string" && o.window.includes("→") ? o.window.split("→") : [null, null];
+  const checkin = o?.checkin ?? wci ?? null;
+  const checkout = o?.checkout ?? wco ?? null;
+  const totalEUR = o?.totalEUR ?? o?.eur ?? null;
+  const currency = o?.currency ?? (o?.total != null ? "TND" : "EUR");
+  const total = o?.total ?? totalEUR ?? null;
+  return {
+    channel: o?.channel ?? "",
+    hotel: o?.hotel ?? null,
+    room: o?.room ?? "",
+    board: o?.board ?? "unknown",
+    checkin,
+    checkout,
+    nights: o?.nights ?? null,
+    window: o?.window ?? (checkin && checkout ? `${checkin}→${checkout}` : null),
+    total,
+    currency,
+    totalTND: o?.totalTND ?? (currency === "TND" ? total : null),
+    totalEUR,
+    eur: o?.eur ?? totalEUR,
+    status: o?.status ?? "verified",
+    occupancyVerified: o?.occupancyVerified ?? true,
+    sourceUrl: o?.sourceUrl ?? null,
+  };
+}
+
+// Keep only the keys the `ChannelPlan` contract allows (additionalProperties:
+// false). find-best-rate.mjs also emits `sources` (config citations, useful to
+// the agent) and `globalApi`, which are not part of the public schema's
+// required set — pass through the allowed keys, drop the rest.
+export function sanitizeChannelPlan(plan) {
+  if (!plan || typeof plan !== "object") return plan ?? null;
+  const { country, region, matched, countrySource, pricedNow, alsoCheck, globalApi, note } = plan;
+  return { country, region, matched, countrySource, pricedNow, alsoCheck, globalApi, note };
+}
+
 // Merge N per-hotel find-best-rate reports into one RankResponse-shaped
 // object: rankings concatenated and re-sorted by totalEUR, `best` = overall
 // minimum, tiersRun/channels unioned. Pure — unit-testable without network.
@@ -517,11 +565,11 @@ export async function rankOffers(req, deps = defaultDeps()) {
     status: merged.status,
     fx: merged.fx,
     geo: merged.geo,
-    channelPlan: merged.channelPlan,
+    channelPlan: sanitizeChannelPlan(merged.channelPlan),
     tiersRun: merged.tiersRun,
     shortCircuited: merged.shortCircuited,
     best: merged.best,
-    ranking: merged.ranking,
+    ranking: (merged.ranking || []).map(normalizeRankingOffer),
     unverifiedOccupancy: merged.unverifiedOccupancy,
     browserObserved: merged.browserObserved,
     channels: merged.channels,

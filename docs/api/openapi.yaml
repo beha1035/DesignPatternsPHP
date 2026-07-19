@@ -31,17 +31,25 @@ info:
   x-max-window-days: 30   # server rejects a --window whose START..END span exceeds this
   x-outbound-allowlist:
     description: >-
-      Seuls ces hôtes sortants sont autorisés côté serveur. Toute autre
-      destination (et toute IP privée/loopback/link-local) est bloquée avant le
-      fetch. Le client ne peut jamais influencer cette liste.
+      Seuls ces hôtes sortants sont autorisés. Toute autre destination (et toute
+      IP privée/loopback/link-local) est bloquée avant le fetch. Le client ne
+      peut jamais influencer cette liste. Deux périmètres (moindre privilège) :
+      `in-process` = requêtes faites DANS le serveur (/api/search, /api/hotels/
+      {id}/price), gardées par webapp/lib/ssrf-guard.mjs ; `subprocess` = hôtes
+      atteints UNIQUEMENT par la cascade shell-out de /api/rank (find-best-rate
+      + outils canaux), gardés par .claude/agents/tools/lib/net-guard.mjs. Le
+      set `subprocess` est un SUR-ensemble de `in-process` (il ajoute les canaux
+      Tier 2/3 que le serveur n'appelle jamais lui-même).
     hosts:
-      - tn.tunisiebooking.com        # Tier 1 — prix vérifié Tunisie (gratuit)
-      - www.google.com               # Tier 0 — Google Hotels (google-hotels-rate)
-      - serpapi.com                  # Tier 0 — clé API (métasearch)
-      - api.apify.com                # Tier 0 — clé API (breadth OTA)
-      - open.er-api.com              # FX EUR/TND
-      - nominatim.openstreetmap.org  # geo ville -> pays
-      - www.booking.com              # Tier 3 — navigateur (signal), slug interne uniquement
+      - tn.tunisiebooking.com        # in-process — Tier 1 prix vérifié Tunisie (gratuit)
+      - www.google.com               # in-process — Tier 0 Google Hotels (google-hotels-rate)
+      - serpapi.com                  # in-process — Tier 0 clé API (métasearch)
+      - api.apify.com                # in-process — Tier 0 clé API (breadth OTA)
+      - open.er-api.com              # in-process — FX EUR/TND
+      - nominatim.openstreetmap.org  # in-process — geo ville -> pays
+      - www.booking.com              # in-process — Tier 3 navigateur (signal), slug interne uniquement
+      - api.brightdata.com           # subprocess — Tier 2 unlock (cascade /api/rank uniquement)
+      - fr.trip.com                  # subprocess — canal Trip.com (cascade /api/rank uniquement)
   contact:
     name: hotel-deal-finder (interne)
   license:

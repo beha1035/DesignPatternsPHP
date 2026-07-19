@@ -7,6 +7,7 @@ import express from "express";
 import helmet from "helmet";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { timingSafeEqual } from "node:crypto";
 
 import { installGlobalFetchGuard } from "./lib/ssrf-guard.mjs";
 import { createLogger } from "./lib/logger.mjs";
@@ -28,6 +29,19 @@ installGlobalFetchGuard();
 const logger = createLogger();
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_PUBLIC_DIR = join(HERE, "public");
+
+// Constant-time bearer comparison: never short-circuit on the first differing
+// byte (that leaks the token prefix via timing). timingSafeEqual requires
+// equal-length buffers, so a length mismatch is compared against `expected`
+// itself (same work, still returns false) rather than bailing early.
+function constantTimeEqual(candidate, expected) {
+  const cand = Buffer.from(String(candidate), "utf8");
+  if (cand.length !== expected.length) {
+    timingSafeEqual(expected, expected); // burn equivalent time, no early exit
+    return false;
+  }
+  return timingSafeEqual(cand, expected);
+}
 
 export function createApp({ bearerToken = process.env.API_BEARER_TOKEN, service, rateLimit, publicDir = DEFAULT_PUBLIC_DIR } = {}) {
   if (!bearerToken) {
@@ -87,11 +101,12 @@ export function createApp({ bearerToken = process.env.API_BEARER_TOKEN, service,
 
   // Bearer auth on everything under /api EXCEPT /api/health (security: [] in
   // the OpenAPI spec).
+  const expectedToken = Buffer.from(String(bearerToken), "utf8");
   app.use("/api", (req, res, next) => {
     if (req.path === "/health") return next();
     const auth = req.headers.authorization || "";
     const [scheme, token] = auth.split(" ");
-    if (scheme !== "Bearer" || token !== bearerToken) {
+    if (scheme !== "Bearer" || !token || !constantTimeEqual(token, expectedToken)) {
       return res.status(401).json({ error: "internal_error", message: "Unauthorized." });
     }
     next();

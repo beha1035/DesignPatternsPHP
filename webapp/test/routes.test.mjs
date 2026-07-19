@@ -51,7 +51,14 @@ function mockService(overrides = {}) {
           tiersRun: ["tier1:tunisiebooking"],
           shortCircuited: false,
           best: { channel: "TunisieBooking", room: "Double", board: "breakfast", window: "2026-07-14→2026-07-16", totalEUR: 241, totalTND: 812, sourceUrl: "https://tn.tunisiebooking.com/detail_hotel_354/", corroborated: false, corroboratedBy: null },
-          ranking: [{ window: "2026-07-14→2026-07-16", channel: "TunisieBooking", board: "breakfast", totalEUR: 241, room: "Double" }],
+          // Full Offer shape — mirrors what service.mjs::rankOffers normalizes
+          // ranking rows to (docs/api/openapi.yaml `Offer` required fields).
+          ranking: [{
+            channel: "TunisieBooking", hotel: "hotel_354", room: "Double", board: "breakfast",
+            checkin: "2026-07-14", checkout: "2026-07-16", nights: 2, window: "2026-07-14→2026-07-16",
+            total: 812, currency: "TND", totalTND: 812, totalEUR: 241, eur: 241,
+            status: "verified", occupancyVerified: true, sourceUrl: "https://tn.tunisiebooking.com/detail_hotel_354/",
+          }],
           channels: ["TunisieBooking"],
           escalation: [],
         }
@@ -177,6 +184,14 @@ test("POST /api/rank: valid body -> 200, RankResponse shape (verified/no_price o
     assert.equal(res.status, 200);
     assert.ok(["verified", "no_price"].includes(res.body.status));
     assert.ok(Array.isArray(res.body.ranking));
+    // Per-item Offer conformance (docs/api/openapi.yaml `Offer` required set):
+    // a ranking row missing status/checkin/checkout/total/currency is exactly
+    // what silently broke the UI honesty guard (P6 finding #1).
+    for (const row of res.body.ranking) {
+      for (const f of ["channel", "board", "checkin", "checkout", "total", "currency", "status"]) {
+        assert.ok(row[f] !== undefined && row[f] !== null, `ranking row missing required Offer field: ${f}`);
+      }
+    }
     assert.equal(res.body.fx.pair, "EUR/TND");
     assert.equal(service.calls.rankOffers, 1);
   });

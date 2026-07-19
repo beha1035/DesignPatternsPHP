@@ -309,9 +309,24 @@ const toEUR = (o, rate) => {
     unverifiedOccupancy: unverifiedOccupancy.length
       ? unverifiedOccupancy.slice(0, 8).map((o) => ({ channel: o.channel, priceEUR: o.eur, note: o.occupancyNote || "occupancy not verified — signal only" }))
       : undefined,
+    // Ranking rows carry the full priced-offer shape (not a 5-field digest):
+    // the webapp contract (docs/api/openapi.yaml `Offer`) — and the UI's
+    // honesty guard (public/js/offers.js `isHonestVerifiedRow`) — REQUIRE
+    // status/checkin/checkout/total/currency, and the TND toggle needs the
+    // native totalTND. These rows are all occupancy-verified by construction
+    // (`all` filtered out occupancyVerified===false above), so status is
+    // "verified"; occupancyVerified defaults to true when the channel left it
+    // unset (TunisieBooking's exact-party quote).
     ranking: all.slice(0, 12).map((o) => ({
-      window: o.window, channel: o.channel, board: o.board,
-      totalEUR: o.eur, room: o.room,
+      channel: o.channel, hotel: o.hotel ?? null, room: o.room ?? "",
+      board: o.board, checkin: o.checkin ?? null, checkout: o.checkout ?? null,
+      nights: o.nights ?? a.nights, window: o.window,
+      total: o.total, currency: o.currency,
+      totalTND: o.totalTND ?? (o.currency === "TND" ? o.total : null),
+      totalEUR: o.totalEUR ?? o.eur ?? null, eur: o.eur,
+      status: o.status ?? "verified",
+      occupancyVerified: o.occupancyVerified ?? true,
+      sourceUrl: o.sourceUrl ?? null,
     })),
     channels: [...distinctChannels],
     escalation,

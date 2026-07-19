@@ -7,19 +7,26 @@
 //
 // Policy: HTTPS only, host must be in the allowlist, and IP-literal hosts are
 // rejected outright (metadata 169.254.169.254, loopback, private ranges can
-// never be reached because they are never hostnames in the allowlist). Keep this
-// list in sync with the webapp x-outbound-allowlist.
+// never be reached because they are never hostnames in the allowlist).
+//
+// This subprocess allowlist is the SUPERSET of webapp/lib/ssrf-guard.mjs's
+// in-process list: the /api/rank cascade runs here and reaches the Tier 2/3
+// channels (api.brightdata.com, fr.trip.com) that the server process itself
+// never calls. The full union is documented in docs/api/openapi.yaml
+// `x-outbound-allowlist` (each host annotated in-process vs subprocess). Adding
+// a host here means adding it there too (and to the in-process guard only if
+// the server itself will call it).
 
 const ALLOWED = new Set([
-  "tn.tunisiebooking.com",
-  "www.google.com",
-  "serpapi.com",
-  "api.apify.com",
-  "api.brightdata.com",
-  "open.er-api.com",
-  "nominatim.openstreetmap.org",
-  "www.booking.com",
-  "fr.trip.com",
+  "tn.tunisiebooking.com",        // Tier 1 — verified Tunisia price (also in-process)
+  "www.google.com",               // Tier 0 — Google Hotels (also in-process)
+  "serpapi.com",                  // Tier 0 — metasearch key (also in-process)
+  "api.apify.com",                // Tier 0 — breadth OTA key (also in-process)
+  "api.brightdata.com",           // Tier 2 — unlock (subprocess-only)
+  "open.er-api.com",              // FX EUR/TND (also in-process)
+  "nominatim.openstreetmap.org",  // geo city -> country (also in-process)
+  "www.booking.com",              // Tier 3 — browser signal (also in-process)
+  "fr.trip.com",                  // Trip.com channel (subprocess-only)
 ]);
 
 const isIpLiteral = (h) => /^\d{1,3}(\.\d{1,3}){3}$/.test(h) || h.includes(":");

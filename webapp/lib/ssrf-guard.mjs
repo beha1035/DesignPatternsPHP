@@ -9,9 +9,18 @@
 // tools — separate processes with their own globalThis. Those are guarded
 // independently by `.claude/agents/tools/lib/net-guard.mjs`, which every CLI
 // entry script imports for side effect (and which browser-rate also calls
-// explicitly before page.goto, since Playwright bypasses fetch). Keep the two
-// allowlists in sync. Together they make the "every outbound request is
-// guarded" claim actually true across all processes.
+// explicitly before page.goto, since Playwright bypasses fetch). Together they
+// make the "every outbound request is guarded" claim true across all processes.
+//
+// The two allowlists are NOT identical, by design (least privilege per
+// boundary): this in-process list is a SUBSET — only the hosts the SERVER
+// itself calls for /api/search and /api/hotels/{id}/price (Tier 0/1 + geo/fx +
+// booking). net-guard is a SUPERSET that additionally allows the Tier 2/3
+// channels (api.brightdata.com, fr.trip.com) reached ONLY by the /api/rank
+// shell-out cascade, never by this process. The union is documented in
+// docs/api/openapi.yaml `x-outbound-allowlist` (annotated in-process /
+// subprocess). Do NOT widen this in-process list to "match" net-guard — that
+// would grow the server's own SSRF surface for no reason.
 //
 // Two independent controls, both required to pass:
 //   1. Host allowlist (`x-outbound-allowlist` in openapi.yaml) — exact
